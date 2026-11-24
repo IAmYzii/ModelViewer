@@ -1,0 +1,432 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Model Viewer</title>
+<style>
+  :root {
+    --bg-top: #3a3f47; --bg-bottom: #1c1e22;
+    --panel: rgba(24, 26, 30, .82); --border: rgba(255, 255, 255, .12);
+    --text: #e8eaed; --muted: #9aa0a8; --accent: #4c9dff;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; }
+  body {
+    background: linear-gradient(var(--bg-top), var(--bg-bottom));
+    color: var(--text); font: 13px/1.4 "Segoe UI", system-ui, sans-serif;
+    user-select: none;
+  }
+  canvas { display: block; width: 100%; height: 100%; outline: none; }
+  #bar {
+    position: fixed; top: 10px; left: 10px; right: 10px; display: flex; gap: 6px;
+    align-items: center; pointer-events: none;
+  }
+  #bar > * { pointer-events: auto; }
+  button {
+    background: var(--panel); color: var(--text); border: 1px solid var(--border);
+    border-radius: 6px; padding: 6px 12px; font: inherit; cursor: pointer;
+    backdrop-filter: blur(6px);
+  }
+  button:hover { border-color: rgba(255, 255, 255, .3); }
+  button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button kbd { opacity: .55; font: inherit; margin-left: 6px; }
+  #name { margin-left: 8px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #stats {
+    position: fixed; left: 12px; bottom: 10px; color: var(--muted);
+    font-variant-numeric: tabular-nums; pointer-events: none;
+  }
+  #help { position: fixed; right: 12px; bottom: 10px; color: var(--muted); pointer-events: none; }
+  #empty {
+    position: fixed; inset: 0; display: grid; place-items: center; text-align: center;
+    pointer-events: none; color: var(--muted);
+  }
+  #empty b { display: block; font-size: 20px; font-weight: 600; color: var(--text); margin-bottom: 6px; }
+  #drop {
+    position: fixed; inset: 8px; border: 2px dashed var(--accent); border-radius: 12px;
+    background: rgba(76, 157, 255, .12); display: none; pointer-events: none;
+  }
+  body.dragging #drop { display: block; }
+  #toast {
+    position: fixed; left: 50%; top: 56px; transform: translateX(-50%);
+    background: #7a2b2b; border: 1px solid #b44; border-radius: 6px; padding: 8px 14px;
+    max-width: 80vw; display: none; user-select: text;
+  }
+  #busy { position: fixed; inset: 0; display: none; place-items: center; background: rgba(0, 0, 0, .35); font-size: 16px; }
+</style>
+<script type="importmap">
+{ "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<canvas id="view" tabindex="0"></canvas>
+
+<div id="bar">
+  <button id="open">Open…</button>
+  <button id="frame">Frame<kbd>F</kbd></button>
+  <button id="wire">Wireframe<kbd>W</kbd></button>
+  <button id="grid" class="on">Grid<kbd>G</kbd></button>
+  <button id="rotx" title="Rotate 90° around X (Shift: other way)">Rotate X<kbd>X</kbd></button>
+  <button id="roty" title="Rotate 90° around Y (Shift: other way)">Rotate Y<kbd>Y</kbd></button>
+  <button id="rotz" title="Rotate 90° around Z (Shift: other way)">Rotate Z<kbd>Z</kbd></button>
+  <span id="name"></span>
+</div>
+
+<div id="empty"><div><b>Drop an .fbx or .obj file here</b>or click Open. Drop textures / .mtl together with the model to use them.</div></div>
+<div id="stats"></div>
+<div id="help">Left drag: rotate · Right drag: pan · Wheel: zoom</div>
+<div id="drop"></div>
+<div id="toast"></div>
+<div id="busy">Loading…</div>
+<input id="file" type="file" multiple hidden
+       accept=".fbx,.obj,.mtl,.png,.jpg,.jpeg,.bmp,.gif,.webp,.tga">
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
+import { MTLLoader } from 'three/addons/loaders/MTLLoader.js';
+import { TGALoader } from 'three/addons/loaders/TGALoader.js';
+
+const $ = id => document.getElementById(id);
+const canvas = $('view');
+
+// ---------- scene ----------
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(40, 1, 0.01, 1000);
+camera.position.set(3, 2, 3);
+scene.add(camera);
+
+// Simple shading: soft sky/ground fill plus a headlight that follows the camera.
+scene.add(new THREE.HemisphereLight(0xffffff, 0x555a60, 1.3));
+const headlight = new THREE.DirectionalLight(0xffffff, 2.2);
+headlight.position.set(0.4, 0.8, 1);
+camera.add(headlight);
+
+const controls = new OrbitControls(camera, canvas);
+controls.enableDamping = true;
+controls.dampingFactor = 0.12;
+controls.zoomToCursor = true;
+
+let grid = null;
+let model = null;
+let radius = 1;
+const state = { wireframe: false, grid: true };
+
+function resize() {
+  const w = innerWidth, h = innerHeight;
+  if (!w || !h) return;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}
+addEventListener('resize', resize);
+resize();
+
+renderer.setAnimationLoop(() => {
+  controls.update();
+  renderer.render(scene, camera);
+});
+
+// ---------- helpers ----------
+function eachMaterial(root, fn) {
+  root.traverse(o => {
+    if (!o.material) return;
+    (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => fn(m, o));
+  });
+}
+
+const TEX_SLOTS = ['map', 'normalMap', 'bumpMap', 'specularMap', 'emissiveMap', 'alphaMap',
+  'aoMap', 'displacementMap', 'roughnessMap', 'metalnessMap'];
+
+// Textures that failed to load would render black; drop them so the model stays visible.
+function dropBrokenTextures(root) {
+  eachMaterial(root, m => {
+    for (const k of TEX_SLOTS) {
+      if (m[k] && !m[k].image) { m[k] = null; m.needsUpdate = true; }
+    }
+  });
+}
+
+function disposeModel(root) {
+  root.traverse(o => o.geometry?.dispose());
+  eachMaterial(root, m => {
+    for (const k of TEX_SLOTS) m[k]?.dispose();
+    m.dispose();
+  });
+}
+
+function toast(msg) {
+  const t = $('toast');
+  t.textContent = msg;
+  t.style.display = 'block';
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => (t.style.display = 'none'), 6000);
+}
+
+function frame() {
+  if (!model) return;
+  const box = new THREE.Box3().setFromObject(model);
+  if (box.isEmpty()) return;
+  const center = box.getCenter(new THREE.Vector3());
+  radius = box.getSize(new THREE.Vector3()).length() / 2 || 1;
+  const fitV = radius / Math.sin(THREE.MathUtils.degToRad(camera.fov / 2));
+  const dist = Math.max(fitV, fitV / Math.min(camera.aspect, 1)) * 1.05;
+  const dir = new THREE.Vector3(1, 0.6, 1).normalize();
+  camera.position.copy(center).addScaledVector(dir, dist);
+  camera.near = radius / 200;
+  camera.far = radius * 400;
+  camera.updateProjectionMatrix();
+  controls.target.copy(center);
+  controls.minDistance = radius / 100;
+  controls.maxDistance = radius * 100;
+  controls.update();
+}
+
+function buildGrid() {
+  if (grid) { scene.remove(grid); grid.geometry.dispose(); grid.material.dispose(); grid = null; }
+  if (!model) return;
+  const box = new THREE.Box3().setFromObject(model);
+  if (box.isEmpty()) return;
+  const size = box.getSize(new THREE.Vector3());
+  const center = box.getCenter(new THREE.Vector3());
+  const span = Math.max(size.x, size.z, size.y * 0.5) || 1;
+  const cell = Math.pow(10, Math.floor(Math.log10(span))) / 2;
+  const cells = Math.ceil((span * 2) / cell / 2) * 2;
+  grid = new THREE.GridHelper(cells * cell, cells, 0x8a9099, 0x5a6068);
+  grid.material.transparent = true;
+  grid.material.opacity = 0.45;
+  grid.position.set(center.x, box.min.y, center.z);
+  grid.visible = state.grid;
+  scene.add(grid);
+}
+
+// Turn the model 90° around a world axis; the choice is remembered per file name.
+let modelKey = '';
+const AXES = { x: new THREE.Vector3(1, 0, 0), y: new THREE.Vector3(0, 1, 0), z: new THREE.Vector3(0, 0, 1) };
+function rotate(axis, reverse = false) {
+  if (!model) return;
+  const q = new THREE.Quaternion().setFromAxisAngle(AXES[axis], (reverse ? -1 : 1) * Math.PI / 2);
+  model.quaternion.premultiply(q).normalize();
+  model.updateMatrixWorld(true);
+  try {
+    const identity = Math.abs(model.quaternion.w) > 0.9999;
+    if (identity) localStorage.removeItem(modelKey);
+    else localStorage.setItem(modelKey, JSON.stringify(model.quaternion.toArray()));
+  } catch {}
+  // Keep the current viewing direction and distance, just re-centre on the model.
+  const offset = camera.position.clone().sub(controls.target);
+  buildGrid();
+  const center = new THREE.Box3().setFromObject(model).getCenter(new THREE.Vector3());
+  controls.target.copy(center);
+  camera.position.copy(center).add(offset);
+  controls.update();
+}
+
+function applyWireframe() {
+  if (model) eachMaterial(model, m => { if ('wireframe' in m) m.wireframe = state.wireframe; });
+  $('wire').classList.toggle('on', state.wireframe);
+}
+
+function updateStats() {
+  let meshes = 0, tris = 0, verts = 0;
+  model.traverse(o => {
+    if (!o.isMesh) return;
+    meshes++;
+    const g = o.geometry, pos = g.attributes.position;
+    if (!pos) return;
+    verts += pos.count;
+    tris += (g.index ? g.index.count : pos.count) / 3;
+  });
+  const n = v => Math.round(v).toLocaleString('en-US');
+  $('stats').textContent = `${n(meshes)} meshes · ${n(tris)} triangles · ${n(verts)} vertices`;
+}
+
+// ---------- loading ----------
+const isModel = n => /\.(fbx|obj)$/i.test(n);
+const baseName = p => decodeURIComponent(p).split(/[\\/]/).pop().toLowerCase();
+
+/**
+ * @param {string} name      model file name
+ * @param {ArrayBuffer} data model bytes
+ * @param {Map<string,string>} files  lower-case file name -> URL for sibling files (textures, mtl)
+ * @param {string} basePath  URL prefix for resources not found in `files`
+ */
+async function loadModel(name, data, files = new Map(), basePath = '') {
+  const manager = new THREE.LoadingManager();
+  manager.addHandler(/\.tga$/i, new TGALoader(manager));
+  manager.setURLModifier(url => {
+    if (/^(blob|data):/i.test(url)) return url;
+    return files.get(baseName(url)) ?? url;
+  });
+  let pending = false, root = null;
+  manager.onStart = () => (pending = true);
+  manager.onLoad = () => { pending = false; if (root) dropBrokenTextures(root); };
+
+  if (/\.fbx$/i.test(name)) {
+    root = new FBXLoader(manager).parse(data, basePath);
+  } else {
+    const text = new TextDecoder().decode(data);
+    const loader = new OBJLoader(manager);
+    // Material library: the one the OBJ names (dropped alongside or next to it on
+    // disk), else any .mtl that was dropped with it.
+    const wanted = text.match(/^mtllib\s+(.+)$/m)?.[1].trim();
+    let mtlUrl = wanted && files.get(baseName(wanted));
+    if (!mtlUrl && wanted && basePath) mtlUrl = basePath + encodeURIComponent(wanted);
+    if (!mtlUrl) mtlUrl = files.get([...files.keys()].find(k => k.endsWith('.mtl')));
+    let hasMtl = false;
+    if (mtlUrl) {
+      const res = await fetch(mtlUrl).catch(() => null);
+      if (res?.ok) {
+        const materials = new MTLLoader(manager).parse(await res.text(), basePath);
+        materials.preload();
+        loader.setMaterials(materials);
+        hasMtl = true;
+      }
+    }
+    root = loader.parse(text);
+    if (!hasMtl) {
+      const gray = new THREE.MeshStandardMaterial({ color: 0xb8bcc2, roughness: 0.6, metalness: 0 });
+      root.traverse(o => {
+        if (!o.isMesh) return;
+        const m = gray.clone();
+        m.vertexColors = !!o.geometry.attributes.color;
+        m.flatShading = !o.geometry.attributes.normal;
+        o.material = m;
+      });
+    }
+  }
+
+  // Viewer-friendly material fixes.
+  eachMaterial(root, m => {
+    m.side = THREE.DoubleSide;
+    if (m.transparent && m.opacity === 0) { m.opacity = 1; m.transparent = false; }
+  });
+  if (!pending) dropBrokenTextures(root);
+
+  let hasGeometry = false;
+  root.traverse(o => { if (o.geometry?.attributes?.position?.count) hasGeometry = true; });
+  if (!hasGeometry) throw new Error('No geometry found in file.');
+
+  if (model) { scene.remove(model); disposeModel(model); }
+  // The loaded file sits inside a holder group, so orientation fixes (Rotate X/Y/Z)
+  // never fight with transforms stored in the file itself.
+  model = new THREE.Group();
+  model.add(root);
+  modelKey = 'rot:' + name.toLowerCase();
+  try {
+    const saved = JSON.parse(localStorage.getItem(modelKey));
+    if (Array.isArray(saved) && saved.length === 4) model.quaternion.fromArray(saved);
+  } catch {}
+  scene.add(model);
+  applyWireframe();
+  buildGrid();
+  frame();
+  updateStats();
+  $('name').textContent = name;
+  document.title = `${name} – Model Viewer`;
+  $('empty').style.display = 'none';
+}
+
+let blobUrls = [];
+async function openFiles(fileList) {
+  const list = [...fileList];
+  const main = list.find(f => isModel(f.name));
+  if (!main) { toast('No .fbx or .obj file in the selection.'); return; }
+  $('busy').style.display = 'grid';
+  await new Promise(r => setTimeout(r, 30)); // let the overlay paint before the blocking parse
+  const oldUrls = blobUrls;
+  blobUrls = [];
+  const files = new Map();
+  for (const f of list) {
+    if (f === main) continue;
+    const url = URL.createObjectURL(f);
+    blobUrls.push(url);
+    files.set(f.name.toLowerCase(), url);
+  }
+  // In the desktop app we know where the file lives, so textures and .mtl files
+  // next to it are picked up without having to drop them too.
+  let basePath = '';
+  const diskPath = window.viewerHost?.pathForFile(main);
+  if (diskPath) {
+    const parts = diskPath.replace(/\\/g, '/').split('/');
+    parts.pop();
+    basePath = '/@fs/' + parts.map(encodeURIComponent).join('/') + '/';
+  }
+  try {
+    await loadModel(main.name, await main.arrayBuffer(), files, basePath);
+    oldUrls.forEach(u => URL.revokeObjectURL(u));
+  } catch (e) {
+    console.error(e);
+    toast(`Could not load ${main.name}: ${e.message}`);
+  } finally {
+    $('busy').style.display = 'none';
+  }
+}
+
+async function openUrl(url) {
+  $('busy').style.display = 'grid';
+  try {
+    const abs = new URL(url, location.href);
+    const res = await fetch(abs);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const base = abs.href.slice(0, abs.href.lastIndexOf('/') + 1);
+    const name = decodeURIComponent(abs.pathname).split('/').pop();
+    await loadModel(name, await res.arrayBuffer(), new Map(), base);
+  } catch (e) {
+    console.error(e);
+    toast(`Could not load ${url}: ${e.message}`);
+  } finally {
+    $('busy').style.display = 'none';
+  }
+}
+
+// ---------- UI ----------
+$('open').onclick = () => $('file').click();
+$('file').onchange = e => { openFiles(e.target.files); e.target.value = ''; };
+$('frame').onclick = frame;
+$('wire').onclick = () => { state.wireframe = !state.wireframe; applyWireframe(); };
+$('grid').onclick = () => {
+  state.grid = !state.grid;
+  if (grid) grid.visible = state.grid;
+  $('grid').classList.toggle('on', state.grid);
+};
+
+addEventListener('keydown', e => {
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  const k = e.key.toLowerCase();
+  if (k === 'f') frame();
+  else if (k === 'w') $('wire').click();
+  else if (k === 'g') $('grid').click();
+  else if (k === 'o') $('open').click();
+  else if (k === 'x' || k === 'y' || k === 'z') rotate(k, e.shiftKey);
+});
+for (const axis of ['x', 'y', 'z']) $('rot' + axis).onclick = e => rotate(axis, e.shiftKey);
+
+let dragDepth = 0;
+addEventListener('dragenter', e => { e.preventDefault(); dragDepth++; document.body.classList.add('dragging'); });
+addEventListener('dragleave', () => { if (--dragDepth <= 0) { dragDepth = 0; document.body.classList.remove('dragging'); } });
+addEventListener('dragover', e => e.preventDefault());
+addEventListener('drop', e => {
+  e.preventDefault();
+  dragDepth = 0;
+  document.body.classList.remove('dragging');
+  if (e.dataTransfer.files.length) openFiles(e.dataTransfer.files);
+});
+
+// Handle for debugging from the browser console.
+window.viewer = { THREE, renderer, scene, camera, controls, frame, rotate, get model() { return model; } };
+
+// viewer.html?src=path/or/url/to/model.fbx
+const src = new URLSearchParams(location.search).get('src');
+if (src) openUrl(src);
+</script>
+</body>
+</html>

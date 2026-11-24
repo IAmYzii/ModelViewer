@@ -1,0 +1,5 @@
+newmtl wall
+Kd 1 1 1
+map_Kd checker.png
+newmtl roof
+Kd 0.25 0.35 0.6
