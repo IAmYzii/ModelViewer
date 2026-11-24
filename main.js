@@ -70,13 +70,11 @@ async function handleRequest(request) {
 
 const diskUrl = p => '/@fs/' + p.replace(/\\/g, '/').split('/').map(encodeURIComponent).join('/');
 
-function modelFromArgs(argv, cwd) {
-  for (const arg of argv.slice(1)) {
-    if (!/\.(fbx|obj)$/i.test(arg)) continue;
-    const p = path.resolve(cwd, arg);
-    if (fs.existsSync(p)) return p;
-  }
-  return null;
+function modelsFromArgs(argv, cwd) {
+  return argv.slice(1)
+    .filter(arg => /\.(fbx|obj)$/i.test(arg))
+    .map(arg => path.resolve(cwd, arg))
+    .filter(p => fs.existsSync(p));
 }
 
 function argValue(argv, name) {
@@ -84,27 +82,36 @@ function argValue(argv, name) {
   return hit ? hit.slice(name.length + 3) : null;
 }
 
-// Each window may watch the one file it shows and is told when it was rewritten.
-const watchers = new Map();   // webContents id -> { file, listener }
-function unwatch(id) {
-  const w = watchers.get(id);
-  if (!w) return;
-  fs.unwatchFile(w.file, w.listener);
-  watchers.delete(id);
+// A window watches the files of its tabs and is told when one was rewritten.
+const watchers = new Map();   // webContents id -> Map(file -> listener)
+function unwatch(id, keep = []) {
+  const files = watchers.get(id);
+  if (!files) return;
+  for (const [file, listener] of files) {
+    if (keep.includes(file)) continue;
+    fs.unwatchFile(file, listener);
+    files.delete(file);
+  }
+  if (!files.size) watchers.delete(id);
 }
-ipcMain.on('watch-file', (event, file) => {
+ipcMain.on('watch-files', (event, list) => {
   const sender = event.sender, id = sender.id;
-  unwatch(id);
-  if (typeof file !== 'string' || !file) return;
-  let timer = null;
-  const listener = (cur, prev) => {
-    if (!cur.size || (cur.mtimeMs === prev.mtimeMs && cur.size === prev.size)) return;
-    // Exporters write in several steps; wait until the file has been quiet.
-    clearTimeout(timer);
-    timer = setTimeout(() => { if (!sender.isDestroyed()) sender.send('file-changed', file); }, 400);
-  };
-  fs.watchFile(file, { interval: 500 }, listener);
-  watchers.set(id, { file, listener });
+  const wanted = Array.isArray(list) ? list.filter(f => typeof f === 'string' && f) : [];
+  unwatch(id, wanted);
+  const files = watchers.get(id) ?? new Map();
+  for (const file of wanted) {
+    if (files.has(file)) continue;
+    let timer = null;
+    const listener = (cur, prev) => {
+      if (!cur.size || (cur.mtimeMs === prev.mtimeMs && cur.size === prev.size)) return;
+      // Exporters write in several steps; wait until the file has been quiet.
+      clearTimeout(timer);
+      timer = setTimeout(() => { if (!sender.isDestroyed()) sender.send('file-changed', file); }, 400);
+    };
+    fs.watchFile(file, { interval: 500 }, listener);
+    files.set(file, listener);
+  }
+  if (files.size) watchers.set(id, files);
 });
 // Returns nothing on success; a failure rejects in the page, which reports it.
 ipcMain.handle('copy-image', async (_event, dataUrl) => {
@@ -115,7 +122,9 @@ ipcMain.handle('copy-image', async (_event, dataUrl) => {
   await clipboard.write([new ClipboardItem({ 'image/png': new Blob([png], { type: 'image/png' }) })]);
 });
 
-function createWindow(modelPath) {
+let mainWindow = null;
+
+function createWindow(models) {
   const win = new BrowserWindow({
     width: 1280, height: 800, backgroundColor: '#1c1e22', title: 'Model Viewer',
     webPreferences: { preload: path.join(__dirname, 'preload.js') },
@@ -130,7 +139,7 @@ function createWindow(modelPath) {
   win.webContents.on('destroyed', () => unwatch(contentsId));
   // Switches that set up the view, see README.
   const params = new URLSearchParams();
-  if (modelPath) params.set('src', diskUrl(modelPath));
+  for (const model of models) params.append('src', diskUrl(model));
   for (const name of ['shade', 'wire', 'vc', 'explode', 'select']) {
     const value = argValue(process.argv, name);
     if (value) params.set(name, value);
@@ -139,6 +148,8 @@ function createWindow(modelPath) {
     if (process.argv.includes('--' + flag)) params.set(flag, '1');
   }
   win.loadURL('app://app/viewer.html?' + params);
+  win.on('closed', () => { if (mainWindow === win) mainWindow = null; });
+  mainWindow = win;
   return win;
 }
 
@@ -150,13 +161,22 @@ if (!app.isPackaged) app.setPath('userData', path.join(app.getPath('appData'), '
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
-  app.on('second-instance', (_e, argv, cwd) => createWindow(modelFromArgs(argv, cwd)));
+  // Started again (for example "Open with" in Explorer): the files become new
+  // tabs in the window that is already open.
+  app.on('second-instance', (_e, argv, cwd) => {
+    const models = modelsFromArgs(argv, cwd);
+    if (!mainWindow) { createWindow(models); return; }
+    if (models.length) mainWindow.webContents.send('open-files', models);
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+  });
   app.on('window-all-closed', () => app.quit());
 
   app.whenReady().then(() => {
     Menu.setApplicationMenu(null);
     protocol.handle('app', handleRequest);
-    const win = createWindow(modelFromArgs(process.argv, process.cwd()));
+    const win = createWindow(modelsFromArgs(process.argv, process.cwd()));
 
     // ModelViewer.exe model.fbx --screenshot=out.png  → save a picture and exit.
     const shot = argValue(process.argv, 'screenshot');

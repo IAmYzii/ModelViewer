@@ -9,7 +9,7 @@
     --bg-top: #3a3f47; --bg-bottom: #1c1e22;
     --panel: rgba(24, 26, 30, .86); --border: rgba(255, 255, 255, .12);
     --text: #e8eaed; --muted: #9aa0a8; --accent: #4c9dff;
-    --top: 52px; /* bottom edge of the toolbar, kept in sync by script */
+    --top: 88px; /* bottom edge of the toolbar, kept in sync by script */
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; overflow: hidden; }
@@ -19,8 +19,28 @@
     user-select: none;
   }
   canvas { display: block; width: 100%; height: 100%; outline: none; }
+  #tabs {
+    position: fixed; top: 0; left: 0; right: 0; height: 36px; display: flex; align-items: flex-end;
+    gap: 2px; padding: 0 10px; background: rgba(0, 0, 0, .3); border-bottom: 1px solid var(--border);
+    overflow: hidden;
+  }
+  .tab {
+    display: flex; align-items: center; gap: 4px; min-width: 0; max-width: 220px; height: 29px;
+    padding: 0 4px 0 12px; border: 1px solid transparent; border-bottom: 0;
+    border-radius: 7px 7px 0 0; color: var(--muted); cursor: pointer; white-space: nowrap;
+  }
+  .tab:hover { background: rgba(255, 255, 255, .06); }
+  .tab.on { background: var(--bg-top); border-color: var(--border); color: var(--text); }
+  .tab .tname { overflow: hidden; text-overflow: ellipsis; }
+  .tab.stale .tname::after { content: ' \2022'; color: var(--accent); }
+  #tabs button {
+    border: 0; background: none; backdrop-filter: none; color: inherit; padding: 0 6px;
+    height: 22px; border-radius: 4px; opacity: .65; font-size: 15px; line-height: 1;
+  }
+  #tabs button:hover { background: rgba(255, 255, 255, .15); opacity: 1; }
+  #tabs .add { align-self: center; color: var(--muted); flex: none; }
   #bar {
-    position: fixed; top: 10px; left: 10px; right: 10px; display: flex; gap: 6px; flex-wrap: wrap;
+    position: fixed; top: 46px; left: 10px; right: 10px; display: flex; gap: 6px; flex-wrap: wrap;
     align-items: center; pointer-events: none;
   }
   #bar > * { pointer-events: auto; }
@@ -44,7 +64,6 @@
     border: 1px solid var(--border); border-radius: 6px; padding: 4px 10px; height: 31px;
   }
   .slider input { width: 70px; accent-color: var(--accent); }
-  #name { margin-left: 6px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   .panel {
     position: fixed; top: var(--top); bottom: 40px; width: 280px;
@@ -122,6 +141,7 @@
 <body>
 <canvas id="view" tabindex="0"></canvas>
 
+<div id="tabs"></div>
 <div id="bar">
   <button id="open" title="Open a model (O)">Open…</button>
   <button id="frame" title="Frame the model">Frame<kbd>F</kbd></button>
@@ -162,7 +182,6 @@
   <button id="infobtn" title="Model information">Info<kbd>I</kbd></button>
   <button id="shot" title="Copy a screenshot to the clipboard (Ctrl+C). Shift+click or Ctrl+S saves a PNG.">Screenshot</button>
   <button id="viewbtn" title="View options">View ▾</button>
-  <span id="name"></span>
 </div>
 
 <div id="viewmenu" hidden>
@@ -199,7 +218,7 @@
   <div class="foot">Click: select · Alt+click: show only that part</div>
 </div>
 
-<div id="empty"><div><b>Drop an .fbx or .obj file here</b>or click Open. Drop textures / .mtl together with the model to use them.</div></div>
+<div id="empty"><div><b>Drop an .fbx or .obj file here</b>or click Open. Every model opens in its own tab.</div></div>
 <div id="stats"></div>
 <div id="help">Left drag: rotate · Right drag: pan · Wheel: zoom · Click: select part</div>
 <div id="drop"></div>
@@ -241,6 +260,12 @@ const controls = new OrbitControls(camera, canvas);
 controls.enableDamping = true;
 controls.dampingFactor = 0.12;
 controls.zoomToCursor = true;
+
+// Every open model lives in a tab. The variables below always describe the
+// active tab; stash() and activate() move them in and out of the tab objects.
+const tabs = [];
+let active = null;
+let tabIds = 0;
 
 let grid = null;
 let cube = null;       // the 1 m reference cube
@@ -290,7 +315,7 @@ function resize() {
 addEventListener('resize', resize);
 resize();
 new ResizeObserver(() => {
-  document.documentElement.style.setProperty('--top', $('bar').offsetHeight + 20 + 'px');
+  document.documentElement.style.setProperty('--top', $('bar').getBoundingClientRect().bottom + 10 + 'px');
 }).observe($('bar'));
 
 renderer.setAnimationLoop(() => {
@@ -323,14 +348,14 @@ function dropBrokenTextures(materials) {
   }
 }
 
-function disposeModel(obj) {
+function disposeModel(obj, list = parts) {
   obj.traverse(o => o.geometry?.dispose());
   const disposeMaterial = m => {
     for (const k of TEX_SLOTS) if (m[k] !== checker) m[k]?.dispose();
     m.dispose();
   };
   eachMaterial(obj, disposeMaterial);             // whatever is on the meshes now
-  for (const p of parts) {
+  for (const p of list) {
     asArray(p.original).forEach(disposeMaterial); // the file's own materials
     p.override?.dispose();
     p.customMap?.dispose();
@@ -875,9 +900,13 @@ const diskUrl = p => '/@fs/' + p.replace(/\\/g, '/').split('/').map(encodeURICom
  *                files: lower-case file name -> URL for sibling files (textures, mtl)
  *                basePath: URL prefix for resources not found in `files`
  * @param {ArrayBuffer} data  model bytes
- * @param {boolean} keep  reload of the same file: keep camera, hidden parts, textures
+ * @param keepTab  set for a reload: the tab whose model is replaced in place,
+ *                 keeping its camera, rotation, hidden parts and assigned textures.
+ *                 Otherwise the model opens in a new tab.
+ * @returns {boolean} false if a reload was put off because its tab is not showing
  */
-async function loadModel(source, data, keep = false) {
+async function loadModel(source, data, keepTab = null) {
+  const keep = !!keepTab;
   const { name, files, basePath } = source;
   const manager = new THREE.LoadingManager();
   manager.addHandler(/\.tga$/i, new TGALoader(manager));
@@ -936,17 +965,31 @@ async function loadModel(source, data, keep = false) {
   loaded.traverse(o => { if (o.geometry?.attributes?.position?.count) hasGeometry = true; });
   if (!hasGeometry) throw new Error('No geometry found in file.');
 
-  // From here on the new model replaces the old one.
   const carry = new Map();   // what a reload hands over to the same part
+  let oldRotation = null;
   if (keep) {
+    // The user moved to another tab while the file was being read: do it later.
+    if (active !== keepTab) { keepTab.stale = true; renderTabs(); return false; }
     for (const p of parts) {
       carry.set(p.key, { visible: p.mesh.visible, customMap: p.customMap });
       p.customMap = null;
     }
+    oldRotation = model.quaternion.toArray();
+    select(null);
+    scene.remove(model);
+    disposeModel(model);
+  } else {
+    // A new file gets a tab of its own; the model shown so far is put aside.
+    stash();
+    if (model) scene.remove(model);
+    selected = null;
+    selectMesh = null;
+    parts = [];
+    active = { id: ++tabIds, modelBox: new THREE.Box3(), blobUrls: source.blobUrls ?? [], stale: false };
+    tabs.push(active);
   }
-  const oldRotation = keep && model ? model.quaternion.toArray() : null;
-  select(null);
-  if (model) { scene.remove(model); disposeModel(model); }
+  active.name = name;
+  active.path = source.diskPath ?? null;
 
   current = source;
   // The loaded file sits inside a holder group, so orientation fixes (Rot X/Y/Z)
@@ -975,13 +1018,119 @@ async function loadModel(source, data, keep = false) {
   applyNormals();
   renderParts();
   updateStats();
-  $('name').textContent = name;
   document.title = `${name} – Model Viewer`;
   $('empty').style.display = 'none';
-  watchCurrent();
+  renderTabs();
+  watchAll();
+  return true;
 }
 
-let blobUrls = [];
+// ---------- tabs ----------
+// Put the active model's state into its tab object.
+function stash() {
+  if (!active) return;
+  Object.assign(active, { model, root, parts, selected, selectMesh, current, explode, radius, modelKey });
+  active.modelBox.copy(modelBox);
+  active.view = {
+    position: camera.position.clone(), target: controls.target.clone(),
+    near: camera.near, far: camera.far, min: controls.minDistance, max: controls.maxDistance,
+  };
+}
+
+function activate(tab) {
+  if (tab === active || !tabs.includes(tab)) return;
+  stash();
+  if (model) scene.remove(model);
+  active = tab;
+  ({ model, root, parts, selected, selectMesh, current, explode, radius, modelKey } = tab);
+  modelBox.copy(tab.modelBox);
+  scene.add(model);
+  const v = tab.view;
+  camera.position.copy(v.position);
+  camera.near = v.near;
+  camera.far = v.far;
+  camera.updateProjectionMatrix();
+  controls.target.copy(v.target);
+  controls.minDistance = v.min;
+  controls.maxDistance = v.max;
+  controls.update();
+  $('explode').value = (explode / 1.5) * 100;
+  showActive();
+  if (tab.stale) reload();   // its file changed while another tab was showing
+}
+
+// Bring everything on screen in line with the active tab (or with no tab at all).
+function showActive() {
+  applyShade();   // the shading or wireframe may have been changed in another tab
+  applyWire();
+  if (model) refreshScene(false);
+  else { buildCube(); buildGrid(); renderInfo(); }
+  applyNormals();
+  renderParts();
+  if (model) updateStats();
+  else $('stats').textContent = '';
+  document.title = model ? `${current.name} – Model Viewer` : 'Model Viewer';
+  $('empty').style.display = model ? 'none' : '';
+  renderTabs();
+}
+
+function closeTab(tab) {
+  const i = tabs.indexOf(tab);
+  if (i < 0) return;
+  const wasActive = tab === active;
+  if (wasActive) { stash(); scene.remove(tab.model); }
+  disposeModel(tab.model, tab.parts);
+  tab.blobUrls.forEach(u => URL.revokeObjectURL(u));
+  tabs.splice(i, 1);
+  if (wasActive) {
+    active = null;
+    model = root = current = selected = selectMesh = null;
+    parts = [];
+    explode = 0;
+    $('explode').value = 0;
+    const next = tabs[Math.min(i, tabs.length - 1)];
+    if (next) activate(next);
+    else showActive();
+  } else renderTabs();
+  watchAll();
+}
+
+function cycleTab(step) {
+  if (tabs.length < 2) return;
+  activate(tabs[(tabs.indexOf(active) + step + tabs.length) % tabs.length]);
+}
+
+const samePath = (a, b) => !!a && !!b && a.toLowerCase() === b.toLowerCase();
+const findTab = path => tabs.find(t => samePath(t.path, path));
+
+function renderTabs() {
+  const bar = $('tabs');
+  bar.textContent = '';
+  for (const tab of tabs) {
+    const el = document.createElement('div');
+    el.className = 'tab' + (tab === active ? ' on' : '') + (tab.stale ? ' stale' : '');
+    el.title = tab.path ?? tab.name;
+    const name = document.createElement('span');
+    name.className = 'tname';
+    name.textContent = tab.name;
+    const close = document.createElement('button');
+    close.textContent = '×';
+    close.title = 'Close (Ctrl+W)';
+    close.onclick = e => { e.stopPropagation(); closeTab(tab); };
+    el.onclick = () => activate(tab);
+    el.onauxclick = e => { if (e.button === 1) closeTab(tab); };
+    el.append(name, close);
+    bar.append(el);
+  }
+  const add = document.createElement('button');
+  add.className = 'add';
+  add.textContent = '+';
+  add.title = 'Open a model in a new tab (O)';
+  add.onclick = () => $('open').click();
+  bar.append(add);
+  bar.querySelector('.on')?.scrollIntoView({ inline: 'nearest' });
+}
+
 async function openFiles(fileList, dropPoint = null) {
   const list = [...fileList];
   const main = list.find(f => isModel(f.name));
@@ -994,10 +1143,14 @@ async function openFiles(fileList, dropPoint = null) {
     else toast('Drop the image onto the part it belongs to.');
     return;
   }
+  // In the desktop app we know where the file lives, so textures and .mtl files
+  // next to it are picked up without having to drop them too.
+  const diskPath = host?.pathForFile(main) || null;
+  const open = findTab(diskPath);
+  if (open) { activate(open); reload(); return; }   // already in a tab: show it, refreshed
   $('busy').style.display = 'grid';
   await new Promise(r => setTimeout(r, 30)); // let the overlay paint before the blocking parse
-  const oldUrls = blobUrls;
-  blobUrls = [];
+  const blobUrls = [];
   const files = new Map();
   for (const f of list) {
     if (f === main) continue;
@@ -1005,17 +1158,14 @@ async function openFiles(fileList, dropPoint = null) {
     blobUrls.push(url);
     files.set(f.name.toLowerCase(), url);
   }
-  // In the desktop app we know where the file lives, so textures and .mtl files
-  // next to it are picked up without having to drop them too.
-  const diskPath = host?.pathForFile(main) || null;
   let basePath = '';
   if (diskPath) basePath = diskUrl(diskPath.replace(/[\\/][^\\/]*$/, '')) + '/';
-  const source = { name: main.name, files, basePath, diskPath, url: diskPath ? diskUrl(diskPath) : null };
+  const source = { name: main.name, files, basePath, diskPath, url: diskPath ? diskUrl(diskPath) : null, blobUrls };
   try {
     await loadModel(source, await main.arrayBuffer());
-    oldUrls.forEach(u => URL.revokeObjectURL(u));
   } catch (e) {
     console.error(e);
+    blobUrls.forEach(u => URL.revokeObjectURL(u));
     toast(`Could not load ${main.name}: ${e.message}`);
   } finally {
     $('busy').style.display = 'none';
@@ -1023,17 +1173,20 @@ async function openFiles(fileList, dropPoint = null) {
 }
 
 async function openUrl(url) {
+  const abs = new URL(url, location.href);
+  const path = decodeURIComponent(abs.pathname);
+  const diskPath = path.startsWith('/@fs/') ? path.slice(5).replace(/\//g, '\\') : null;
+  const open = findTab(diskPath);
+  if (open) { activate(open); reload(); return; }   // already in a tab: show it, refreshed
   $('busy').style.display = 'grid';
   try {
-    const abs = new URL(url, location.href);
     const res = await fetch(abs, { cache: 'no-store' });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const path = decodeURIComponent(abs.pathname);
     const source = {
       name: path.split('/').pop(),
       files: new Map(),
       basePath: abs.href.slice(0, abs.href.lastIndexOf('/') + 1),
-      diskPath: path.startsWith('/@fs/') ? path.slice(5).replace(/\//g, '\\') : null,
+      diskPath,
       url: abs.href,
     };
     await loadModel(source, await res.arrayBuffer());
@@ -1048,25 +1201,37 @@ async function openUrl(url) {
 // Load the current file again, keeping the view. Used when it changes on disk.
 let reloading = false;
 async function reload() {
-  if (reloading || !current?.url) return;
+  const tab = active, source = current;
+  if (!tab || !source?.url) return;
+  if (reloading) { tab.stale = true; return; }
   reloading = true;
+  tab.stale = false;
   try {
-    const res = await fetch(current.url, { cache: 'no-store' });
+    const res = await fetch(source.url, { cache: 'no-store' });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    await loadModel(current, await res.arrayBuffer(), true);
-    toast(`Reloaded ${current.name}`, 'info');
+    if (await loadModel(source, await res.arrayBuffer(), tab)) toast(`Reloaded ${source.name}`, 'info');
   } catch (e) {
     console.error(e);
-    toast(`Could not reload ${current.name}: ${e.message}`);
+    toast(`Could not reload ${source.name}: ${e.message}`);
   } finally {
     reloading = false;
+    renderTabs();
+    if (active?.stale) reload();   // something changed again in the meantime
   }
 }
 
-function watchCurrent() {
-  host?.watchFile(settings.autoReload && current?.diskPath ? current.diskPath : null);
+// Ask the desktop app to watch the files of all tabs.
+function watchAll() {
+  host?.watchFiles(settings.autoReload ? tabs.map(t => t.path).filter(Boolean) : []);
 }
-host?.onFileChanged(path => { if (current?.diskPath === path) reload(); });
+host?.onFileChanged(path => {
+  const tab = findTab(path);
+  if (!tab) return;
+  if (tab === active) reload();
+  else { tab.stale = true; renderTabs(); }   // reloaded when its tab is shown
+});
+// A file opened from Explorer while the app is already running.
+host?.onOpenFiles(async paths => { for (const p of paths) await openUrl(diskUrl(p)); });
 
 // ---------- screenshot ----------
 async function screenshot(save) {
@@ -1137,7 +1302,7 @@ const applyDefaultRot = () => { $('defrot').textContent = describeRotation(setti
 $('grid').onchange = toggle('grid', applyGrid);
 $('cube').onchange = toggle('cube', applyCube);
 $('normals').onchange = toggle('normals', applyNormals);
-$('autoreload').onchange = toggle('autoReload', watchCurrent);
+$('autoreload').onchange = toggle('autoReload', watchAll);
 $('units').onchange = e => {
   settings.units = e.target.value;
   saveSettings();
@@ -1186,6 +1351,7 @@ applyShade();
 applyWire();
 applyNormals();
 renderInfo();
+renderTabs();
 
 addEventListener('keydown', e => {
   if (e.target.tagName === 'SELECT') return;
@@ -1193,6 +1359,8 @@ addEventListener('keydown', e => {
   if (e.ctrlKey || e.metaKey) {
     if (k === 'c' && !getSelection().toString()) { e.preventDefault(); screenshot(false); }
     else if (k === 's') { e.preventDefault(); screenshot(true); }
+    else if (k === 'w') { e.preventDefault(); if (active) closeTab(active); }
+    else if (k === 'tab') { e.preventDefault(); cycleTab(e.shiftKey ? -1 : 1); }
     return;
   }
   if (e.altKey) return;
@@ -1224,13 +1392,15 @@ addEventListener('drop', e => {
 // Handle for debugging from the browser console.
 window.viewer = {
   THREE, renderer, scene, camera, controls, frame, rotate, select, pick, reload, settings,
+  tabs, activate, closeTab, openUrl,
+  get active() { return active; },
   get model() { return model; }, get parts() { return parts; }, get selected() { return selected; },
 };
 
-// viewer.html?src=path/or/url/to/model.fbx  (&explode=0..1 &select=partIndex)
-const src = query.get('src');
-if (src) {
-  openUrl(src).then(() => {
+// viewer.html?src=path/or/url/to/model.fbx  (repeatable; &explode=0..1 &select=partIndex)
+const sources = query.getAll('src');
+if (sources.length) {
+  (async () => { for (const s of sources) await openUrl(s); })().then(() => {
     if (query.has('explode')) {
       $('explode').value = query.get('explode') * 100;
       $('explode').oninput({ target: $('explode') });

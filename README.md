@@ -3,6 +3,8 @@
 A quick viewer for `.fbx` and `.obj` files on Windows — a small replacement for
 the discontinued 3D Viewer.
 
+- Tabs: every model opens in its own tab, including files opened from Explorer
+  while the app is running (`Ctrl+Tab` switches, `Ctrl+W` or middle-click closes)
 - Simple shading with a light that follows the camera
 - Left drag rotates, right drag pans, wheel zooms toward the cursor
 - Picks up textures and `.mtl` files next to the model (also from folders such
