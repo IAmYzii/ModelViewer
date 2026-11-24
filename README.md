@@ -29,7 +29,11 @@ the discontinued 3D Viewer.
 
 ## Build and install
 
-Requires Node.js.
+The app is a [Tauri](https://tauri.app) shell (Rust) around `viewer.html`; it
+uses the WebView2 runtime that ships with Windows 10/11, so the result is a
+single small `ModelViewer.exe`.
+
+Requires Node.js, Rust (rustup) and the Visual Studio C++ build tools.
 
 ```powershell
 npm install
@@ -37,21 +41,32 @@ npm run build
 .\install.ps1
 ```
 
-`install.ps1` copies the app to `%LOCALAPPDATA%\Programs\ModelViewer` and adds
-it to the "Open with" list for `.fbx` and `.obj` (current user, no admin).
-`.\install.ps1 -Uninstall` removes it again.
+`install.ps1` copies `ModelViewer.exe` to `%LOCALAPPDATA%\Programs\ModelViewer`
+and adds it to the "Open with" list for `.fbx` and `.obj` (current user, no
+admin). `.\install.ps1 -Uninstall` removes it again.
+
+If the build fails with `LNK1104: cannot open file`, the checkout path is too
+long for Windows; set `CARGO_TARGET_DIR` to a short folder (`install.ps1`
+honours it too).
 
 ## Develop
 
 ```powershell
-npm start -- path\to\model.fbx
+npm run dev -- path	o\model.fbx
 ```
 
-`viewer.html` also works on its own in a browser (it then loads three.js from a
-CDN); drop a model onto the page.
+- `viewer.html` — the whole viewer (three.js). It also works on its own in a
+  browser, loading three.js from a CDN; drop a model onto the page.
+- `scripts/build-web.mjs` — copies `viewer.html` and the three.js modules it
+  imports into `web/`, which is embedded into the exe.
+- `src-tauri/src/main.rs` — serves disk files to the page, watches open files,
+  handles "Open with", the clipboard and saving screenshots.
+
+Debug builds (`npm run dev`) can run next to an installed copy; release builds
+hand their files to the window that is already open.
 
 `ModelViewer.exe model.fbx --screenshot=out.png` renders the model to a PNG and
 exits. The view can be set from the command line:
 `--shade=textured|simple|random|checker|vertex|faces|normals`, `--vc=rgb|r|g|b|a`,
 `--wire=black|white|invert|custom`, `--explode=0..1`, `--select=<part index>`,
-`--parts`, `--info`, `--cube`, `--normals`.
+`--parts`, `--info`, `--cube`, `--normals`, `--copy`.

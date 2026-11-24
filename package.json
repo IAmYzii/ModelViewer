@@ -1,18 +1,15 @@
 {
   "name": "model-viewer",
   "productName": "Model Viewer",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Quick viewer for FBX and OBJ files",
-  "main": "main.js",
+  "private": true,
   "scripts": {
-    "start": "electron .",
-    "build": "electron-packager . ModelViewer --platform=win32 --arch=x64 --out=dist --overwrite --asar --ignore=^/test --ignore=^/dist --ignore=^/\\.claude --ignore=\\.ps1$"
-  },
-  "dependencies": {
-    "three": "0.170.0"
+    "web": "node scripts/build-web.mjs",
+    "dev": "npm run web && cargo run --manifest-path src-tauri/Cargo.toml --",
+    "build": "npm run web && cargo build --release --manifest-path src-tauri/Cargo.toml"
   },
   "devDependencies": {
-    "@electron/packager": "^20.3.0",
-    "electron": "^45.4.1"
+    "three": "0.170.0"
   }
 }

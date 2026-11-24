@@ -238,7 +238,39 @@ import { TGALoader } from 'three/addons/loaders/TGALoader.js';
 
 const $ = id => document.getElementById(id);
 const canvas = $('view');
-const host = window.viewerHost ?? null;   // present only inside the desktop app
+
+// ---------- desktop app bridge ----------
+// Inside the desktop app (Tauri) the page can reach the disk and the system;
+// opened as a plain web page, `host` is null and those features are hidden.
+const tauri = window.__TAURI__ ?? null;
+const FS_BASE = 'http://fs.localhost/';   // serves files from disk, see src-tauri/src/main.rs
+const encodePath = p => p.replace(/\\/g, '/').split('/').map(encodeURIComponent).join('/');
+const host = tauri && {
+  invoke: tauri.core.invoke,
+  listen: (event, fn) => tauri.event.listen(event, e => fn(e.payload)),
+  launchArgs: () => tauri.core.invoke('launch_args'),
+  setTitle: title => tauri.core.invoke('set_title', { title }),
+  quit: () => tauri.core.invoke('quit'),
+  // Watch this list of files (replacing the previous list); "file-changed"
+  // fires when one of them has been rewritten.
+  watchFiles: paths => tauri.core.invoke('watch_files', { paths }),
+  async pickModels() {
+    const picked = await tauri.core.invoke('plugin:dialog|open', {
+      options: { multiple: true, title: 'Open model', filters: [{ name: '3D models', extensions: ['fbx', 'obj'] }] },
+    });
+    return picked ? [picked].flat().map(p => (typeof p === 'string' ? p : p.path)) : [];
+  },
+  async pickSave(defaultPath) {
+    const picked = await tauri.core.invoke('plugin:dialog|save', {
+      options: { defaultPath, filters: [{ name: 'PNG image', extensions: ['png'] }] },
+    });
+    return picked ? (typeof picked === 'string' ? picked : picked.path) : null;
+  },
+  saveFile: (path, bytes) =>
+    tauri.core.invoke('save_file', bytes, { headers: { 'x-path': encodeURIComponent(path) } }),
+  copyImage: (rgba, width, height) =>
+    tauri.core.invoke('copy_image', rgba, { headers: { 'x-width': String(width), 'x-height': String(height) } }),
+};
 const V3 = THREE.Vector3;
 
 // ---------- scene ----------
@@ -287,6 +319,14 @@ const settings = {
 };
 try { Object.assign(settings, JSON.parse(localStorage.getItem('settings')) ?? {}); } catch {}
 const query = new URLSearchParams(location.search);
+if (host) {
+  // Command line of the app: model files, and switches such as --shade=checker.
+  for (const arg of await host.launchArgs()) {
+    const flag = arg.match(/^--([a-z]+)(?:=(.*))?$/);
+    if (flag) query.set(flag[1], flag[2] ?? '1');
+    else query.append('src', FS_BASE + encodePath(arg));
+  }
+}
 if (query.has('shade')) settings.shade = query.get('shade');
 if (query.has('vc')) settings.vcChannel = query.get('vc');
 if (query.has('wire')) { settings.wire = true; settings.wireColor = query.get('wire') || settings.wireColor; }
@@ -360,6 +400,11 @@ function disposeModel(obj, list = parts) {
     p.override?.dispose();
     p.customMap?.dispose();
   }
+}
+
+function setTitle(title) {
+  document.title = title;
+  host?.setTitle(title);
 }
 
 function toast(msg, kind = 'error') {
@@ -870,12 +915,21 @@ function showPanels() {
 
 // ---------- textures assigned by hand ----------
 const isImage = n => /\.(png|jpe?g|bmp|gif|webp|tga)$/i.test(n);
-function assignTexture(file, p) {
+// What an image dropped at `point` (or picked without one) should texture.
+function textureTarget(point) {
+  return (point && pick(point.x, point.y)) ?? selected ?? (parts.length === 1 ? parts[0] : null);
+}
+
+function assignTextureFile(file, p) {
   const url = URL.createObjectURL(file);
-  const loader = /\.tga$/i.test(file.name) ? new TGALoader() : new THREE.TextureLoader();
+  assignTexture(url, file.name, p, () => URL.revokeObjectURL(url));
+}
+
+function assignTexture(url, name, p, done = () => {}) {
+  const loader = /\.tga$/i.test(name) ? new TGALoader() : new THREE.TextureLoader();
   loader.load(url, tex => {
-    URL.revokeObjectURL(url);
-    tex.name = file.name;
+    done();
+    tex.name = name;
     tex.colorSpace = THREE.SRGBColorSpace;
     tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
     tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
@@ -885,15 +939,19 @@ function assignTexture(file, p) {
     applyShade();
     renderInfo();
   }, undefined, () => {
-    URL.revokeObjectURL(url);
-    toast(`Could not read ${file.name} as an image.`);
+    done();
+    toast(`Could not read ${name} as an image.`);
   });
 }
 
 // ---------- loading ----------
 const isModel = n => /\.(fbx|obj)$/i.test(n);
 const baseName = p => decodeURIComponent(p).split(/[\\/]/).pop().toLowerCase();
-const diskUrl = p => '/@fs/' + p.replace(/\\/g, '/').split('/').map(encodeURIComponent).join('/');
+const fileName = p => p.split(/[\\/]/).pop();
+const diskUrl = p => FS_BASE + encodePath(p);
+// The disk path behind a URL made by diskUrl(), or null for any other URL.
+const diskPathOf = href =>
+  host && href.startsWith(FS_BASE) ? decodeURIComponent(href.slice(FS_BASE.length)).replace(/\//g, '\\') : null;
 
 /**
  * @param source  { name, files, basePath, diskPath, url }
@@ -1018,7 +1076,7 @@ async function loadModel(source, data, keepTab = null) {
   applyNormals();
   renderParts();
   updateStats();
-  document.title = `${name} – Model Viewer`;
+  setTitle(`${name} – Model Viewer`);
   $('empty').style.display = 'none';
   renderTabs();
   watchAll();
@@ -1069,7 +1127,7 @@ function showActive() {
   renderParts();
   if (model) updateStats();
   else $('stats').textContent = '';
-  document.title = model ? `${current.name} – Model Viewer` : 'Model Viewer';
+  setTitle(model ? `${current.name} – Model Viewer` : 'Model Viewer');
   $('empty').style.display = model ? 'none' : '';
   renderTabs();
 }
@@ -1138,16 +1196,11 @@ async function openFiles(fileList, dropPoint = null) {
     // An image on its own is a texture for the part it was dropped on.
     const image = list.find(f => isImage(f.name));
     if (!image || !model) { toast('No .fbx or .obj file in the selection.'); return; }
-    const target = (dropPoint && pick(dropPoint.x, dropPoint.y)) ?? selected ?? (parts.length === 1 ? parts[0] : null);
-    if (target) assignTexture(image, target);
+    const target = textureTarget(dropPoint);
+    if (target) assignTextureFile(image, target);
     else toast('Drop the image onto the part it belongs to.');
     return;
   }
-  // In the desktop app we know where the file lives, so textures and .mtl files
-  // next to it are picked up without having to drop them too.
-  const diskPath = host?.pathForFile(main) || null;
-  const open = findTab(diskPath);
-  if (open) { activate(open); reload(); return; }   // already in a tab: show it, refreshed
   $('busy').style.display = 'grid';
   await new Promise(r => setTimeout(r, 30)); // let the overlay paint before the blocking parse
   const blobUrls = [];
@@ -1158,9 +1211,9 @@ async function openFiles(fileList, dropPoint = null) {
     blobUrls.push(url);
     files.set(f.name.toLowerCase(), url);
   }
-  let basePath = '';
-  if (diskPath) basePath = diskUrl(diskPath.replace(/[\\/][^\\/]*$/, '')) + '/';
-  const source = { name: main.name, files, basePath, diskPath, url: diskPath ? diskUrl(diskPath) : null, blobUrls };
+  // A file handed over by the browser has no known location: no neighbouring
+  // textures and no reload. (The desktop app opens paths instead, see openPaths.)
+  const source = { name: main.name, files, basePath: '', diskPath: null, url: null, blobUrls };
   try {
     await loadModel(source, await main.arrayBuffer());
   } catch (e) {
@@ -1172,10 +1225,24 @@ async function openFiles(fileList, dropPoint = null) {
   }
 }
 
+// Desktop app: files by path, from the Open dialog, a drop or "Open with".
+async function openPaths(paths, dropPoint = null) {
+  const models = paths.filter(isModel);
+  if (models.length) {
+    for (const p of models) await openUrl(diskUrl(p));
+    return;
+  }
+  const image = paths.find(isImage);
+  if (!image || !model) { if (paths.length) toast('No .fbx or .obj file in the selection.'); return; }
+  const target = textureTarget(dropPoint);
+  if (target) assignTexture(diskUrl(image), fileName(image), target);
+  else toast('Drop the image onto the part it belongs to.');
+}
+
 async function openUrl(url) {
   const abs = new URL(url, location.href);
   const path = decodeURIComponent(abs.pathname);
-  const diskPath = path.startsWith('/@fs/') ? path.slice(5).replace(/\//g, '\\') : null;
+  const diskPath = diskPathOf(abs.href);
   const open = findTab(diskPath);
   if (open) { activate(open); reload(); return; }   // already in a tab: show it, refreshed
   $('busy').style.display = 'grid';
@@ -1224,37 +1291,72 @@ async function reload() {
 function watchAll() {
   host?.watchFiles(settings.autoReload ? tabs.map(t => t.path).filter(Boolean) : []);
 }
-host?.onFileChanged(path => {
+host?.listen('file-changed', path => {
   const tab = findTab(path);
   if (!tab) return;
   if (tab === active) reload();
   else { tab.stale = true; renderTabs(); }   // reloaded when its tab is shown
 });
 // A file opened from Explorer while the app is already running.
-host?.onOpenFiles(async paths => { for (const p of paths) await openUrl(diskUrl(p)); });
+host?.listen('open-files', paths => openPaths(paths));
+
+// The desktop app reports file drops itself (with full paths) instead of the
+// browser's drag events.
+if (host) {
+  const dragging = on => document.body.classList.toggle('dragging', on);
+  host.listen('tauri://drag-enter', () => dragging(true));
+  host.listen('tauri://drag-leave', () => dragging(false));
+  host.listen('tauri://drag-drop', ({ paths, position }) => {
+    dragging(false);
+    openPaths(paths, { x: position.x / devicePixelRatio, y: position.y / devicePixelRatio });
+  });
+}
 
 // ---------- screenshot ----------
-async function screenshot(save) {
-  if (!model) return;
+// The view as it is right now. The drawing buffer is only valid until the next
+// frame, so everything is read out before returning.
+function capture() {
   renderer.render(scene, camera);
   const url = canvas.toDataURL('image/png');   // background stays transparent
-  if (save) {
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = (current?.name ?? 'model').replace(/\.[^.]+$/, '') + '.png';
-    a.click();
-    return;
-  }
+  const flat = document.createElement('canvas');
+  flat.width = canvas.width;
+  flat.height = canvas.height;
+  const ctx = flat.getContext('2d');
+  ctx.drawImage(canvas, 0, 0);
+  const pixels = ctx.getImageData(0, 0, flat.width, flat.height).data;
+  return {
+    url, width: flat.width, height: flat.height,
+    rgba: new Uint8Array(pixels.buffer),
+    png: () => Uint8Array.from(atob(url.slice(url.indexOf(',') + 1)), c => c.charCodeAt(0)),
+  };
+}
+
+async function screenshot(save) {
+  if (!model) return;
+  const shot = capture();
+  const name = (current?.name ?? 'model').replace(/\.[^.]+$/, '') + '.png';
   try {
-    if (host) await host.copyImage(url);
-    else {
-      const blob = await (await fetch(url)).blob();
-      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+    if (save && host) {
+      const path = await host.pickSave(name);
+      if (!path) return;
+      await host.saveFile(path, shot.png());
+      toast(`Saved ${fileName(path)}`, 'info');
+    } else if (save) {
+      const a = document.createElement('a');
+      a.href = shot.url;
+      a.download = name;
+      a.click();
+    } else {
+      if (host) await host.copyImage(shot.rgba, shot.width, shot.height);
+      else {
+        const blob = await (await fetch(shot.url)).blob();
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+      }
+      toast('Screenshot copied to the clipboard', 'info');
     }
-    toast('Screenshot copied to the clipboard', 'info');
   } catch (e) {
     console.error(e);
-    toast('Could not copy the screenshot. Shift+click the button to save it as a file instead.');
+    toast(`Could not ${save ? 'save' : 'copy'} the screenshot: ${e?.message ?? e}`);
   }
 }
 
@@ -1262,10 +1364,10 @@ async function screenshot(save) {
 const setShade = mode => { settings.shade = mode; applyShade(); saveSettings(); };
 const toggle = (key, apply) => () => { settings[key] = !settings[key]; apply(); saveSettings(); };
 
-$('open').onclick = () => $('file').click();
+$('open').onclick = () => (host ? host.pickModels().then(paths => openPaths(paths)) : $('file').click());
 $('file').onchange = e => { openFiles(e.target.files); e.target.value = ''; };
 $('texfile').onchange = e => {
-  if (e.target.files[0] && selected) assignTexture(e.target.files[0], selected);
+  if (e.target.files[0] && selected) assignTextureFile(e.target.files[0], selected);
   e.target.value = '';
 };
 $('frame').onclick = frame;
@@ -1407,6 +1509,13 @@ if (sources.length) {
     }
     if (query.has('select')) select(parts[+query.get('select')]);
     if (query.has('copy')) screenshot(false);
+    // --screenshot=out.png: save the view as a PNG and exit.
+    if (host && query.get('screenshot')) {
+      setTimeout(async () => {
+        try { await host.saveFile(query.get('screenshot'), capture().png()); } catch (e) { console.error(e); }
+        host.quit();
+      }, 1500);
+    }
   });
 }
 </script>

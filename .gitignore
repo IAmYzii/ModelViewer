@@ -1,4 +1,7 @@
 node_modules/
+web/
+src-tauri/target/
+src-tauri/gen/
 dist/
 .claude/
 test/shot-*.png
