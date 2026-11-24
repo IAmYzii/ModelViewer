@@ -19,7 +19,7 @@
   }
   canvas { display: block; width: 100%; height: 100%; outline: none; }
   #bar {
-    position: fixed; top: 10px; left: 10px; right: 10px; display: flex; gap: 6px;
+    position: fixed; top: 10px; left: 10px; right: 10px; display: flex; gap: 6px; flex-wrap: wrap;
     align-items: center; pointer-events: none;
   }
   #bar > * { pointer-events: auto; }
@@ -31,6 +31,34 @@
   button:hover { border-color: rgba(255, 255, 255, .3); }
   button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
   button kbd { opacity: .55; font: inherit; margin-left: 6px; }
+  select {
+    background: var(--panel); color: var(--text); border: 1px solid var(--border);
+    border-radius: 6px; padding: 6px 8px; font: inherit; cursor: pointer;
+  }
+  select option { background: #24272c; }
+  input[type=color] {
+    width: 30px; height: 30px; padding: 2px; border: 1px solid var(--border);
+    border-radius: 6px; background: var(--panel); cursor: pointer;
+  }
+  .sep { width: 1px; height: 20px; background: var(--border); margin: 0 3px; }
+  #parts {
+    position: fixed; top: 52px; right: 10px; bottom: 40px; width: 270px;
+    display: flex; flex-direction: column; background: var(--panel);
+    border: 1px solid var(--border); border-radius: 8px; backdrop-filter: blur(6px);
+  }
+  #parts[hidden] { display: none; }
+  #parts .head { display: flex; gap: 4px; align-items: center; padding: 8px; border-bottom: 1px solid var(--border); }
+  #parts .head b { flex: 1; }
+  #parts .head button { padding: 3px 8px; }
+  #partlist { flex: 1; overflow-y: auto; padding: 4px 0; }
+  #parts .foot { padding: 6px 8px; color: var(--muted); border-top: 1px solid var(--border); font-size: 12px; }
+  .part { display: flex; gap: 6px; align-items: center; padding: 3px 8px; cursor: pointer; }
+  .part:hover { background: rgba(255, 255, 255, .07); }
+  .part.off .pname { color: var(--muted); text-decoration: line-through; }
+  .part .pname { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .part .ptris { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 12px; }
+  .part .sw { width: 10px; height: 10px; border-radius: 2px; display: none; flex: none; }
+  #parts.random .sw { display: block; }
   #name { margin-left: 8px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #stats {
     position: fixed; left: 12px; bottom: 10px; color: var(--muted);
@@ -67,8 +95,24 @@
 <div id="bar">
   <button id="open">Open…</button>
   <button id="frame">Frame<kbd>F</kbd></button>
+  <span class="sep"></span>
+  <select id="shade" title="Shading (keys 1–4)">
+    <option value="textured">Textured</option>
+    <option value="simple">Simple</option>
+    <option value="random">Random colors</option>
+    <option value="checker">UV checker</option>
+  </select>
   <button id="wire">Wireframe<kbd>W</kbd></button>
-  <button id="grid" class="on">Grid<kbd>G</kbd></button>
+  <select id="wirecolor" title="Wireframe color">
+    <option value="black">Black</option>
+    <option value="white">White</option>
+    <option value="invert">Inverted</option>
+    <option value="custom">Custom…</option>
+  </select>
+  <input id="wirecustom" type="color" title="Custom wireframe color" hidden>
+  <button id="grid">Grid<kbd>G</kbd></button>
+  <button id="partsbtn">Parts<kbd>P</kbd></button>
+  <span class="sep"></span>
   <button id="rotx" title="Rotate 90° around X (Shift: other way)">Rotate X<kbd>X</kbd></button>
   <button id="roty" title="Rotate 90° around Y (Shift: other way)">Rotate Y<kbd>Y</kbd></button>
   <button id="rotz" title="Rotate 90° around Z (Shift: other way)">Rotate Z<kbd>Z</kbd></button>
@@ -76,6 +120,14 @@
 </div>
 
 <div id="empty"><div><b>Drop an .fbx or .obj file here</b>or click Open. Drop textures / .mtl together with the model to use them.</div></div>
+<div id="parts" hidden>
+  <div class="head">
+    <b id="partcount">Parts</b>
+    <button id="pall">All</button><button id="pnone">None</button><button id="pinv">Invert</button>
+  </div>
+  <div id="partlist"></div>
+  <div class="foot">Alt+click a part to show only that one</div>
+</div>
 <div id="stats"></div>
 <div id="help">Left drag: rotate · Right drag: pan · Wheel: zoom</div>
 <div id="drop"></div>
@@ -118,7 +170,21 @@ controls.zoomToCursor = true;
 let grid = null;
 let model = null;
 let radius = 1;
-const state = { wireframe: false, grid: true };
+let parts = [];   // one entry per mesh of the loaded model, see collectParts()
+
+// View settings, remembered between runs. URL parameters (?shade=…&wire=…&parts)
+// override them, which the desktop app uses for its command-line switches.
+const settings = { shade: 'textured', wire: false, wireColor: 'black', wireCustom: '#ff8800', grid: true, parts: false };
+try { Object.assign(settings, JSON.parse(localStorage.getItem('settings')) ?? {}); } catch {}
+const query = new URLSearchParams(location.search);
+if (query.has('shade')) settings.shade = query.get('shade');
+if (query.has('wire')) { settings.wire = true; settings.wireColor = query.get('wire') || settings.wireColor; }
+if (query.has('parts')) settings.parts = true;
+if (!['textured', 'simple', 'random', 'checker'].includes(settings.shade)) settings.shade = 'textured';
+if (!['black', 'white', 'invert', 'custom'].includes(settings.wireColor)) settings.wireColor = 'black';
+function saveSettings() {
+  try { localStorage.setItem('settings', JSON.stringify(settings)); } catch {}
+}
 
 function resize() {
   const w = innerWidth, h = innerHeight;
@@ -138,29 +204,35 @@ renderer.setAnimationLoop(() => {
 // ---------- helpers ----------
 function eachMaterial(root, fn) {
   root.traverse(o => {
-    if (!o.material) return;
-    (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => fn(m, o));
+    if (!o.material || o.userData.wire) return;
+    asArray(o.material).forEach(m => fn(m, o));
   });
 }
+const asArray = v => (Array.isArray(v) ? v : [v]);
 
 const TEX_SLOTS = ['map', 'normalMap', 'bumpMap', 'specularMap', 'emissiveMap', 'alphaMap',
   'aoMap', 'displacementMap', 'roughnessMap', 'metalnessMap'];
 
 // Textures that failed to load would render black; drop them so the model stays visible.
-function dropBrokenTextures(root) {
-  eachMaterial(root, m => {
+function dropBrokenTextures(materials) {
+  for (const m of materials) {
     for (const k of TEX_SLOTS) {
       if (m[k] && !m[k].image) { m[k] = null; m.needsUpdate = true; }
     }
-  });
+  }
 }
 
 function disposeModel(root) {
   root.traverse(o => o.geometry?.dispose());
-  eachMaterial(root, m => {
+  const disposeMaterial = m => {
     for (const k of TEX_SLOTS) m[k]?.dispose();
     m.dispose();
-  });
+  };
+  eachMaterial(root, disposeMaterial);           // whatever is on the meshes now
+  for (const p of parts) {
+    asArray(p.original).forEach(disposeMaterial); // the file's own materials
+    p.override?.dispose();
+  }
 }
 
 function toast(msg) {
@@ -204,7 +276,7 @@ function buildGrid() {
   grid.material.transparent = true;
   grid.material.opacity = 0.45;
   grid.position.set(center.x, box.min.y, center.z);
-  grid.visible = state.grid;
+  grid.visible = settings.grid;
   scene.add(grid);
 }
 
@@ -230,23 +302,160 @@ function rotate(axis, reverse = false) {
   controls.update();
 }
 
-function applyWireframe() {
-  if (model) eachMaterial(model, m => { if ('wireframe' in m) m.wireframe = state.wireframe; });
-  $('wire').classList.toggle('on', state.wireframe);
+// ---------- parts, shading, wireframe ----------
+const fmt = v => Math.round(v).toLocaleString('en-US');
+
+// Surfaces are pushed back a hair so the wireframe drawn over them does not flicker.
+const SURFACE = { side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 };
+const surface = opts => new THREE.MeshStandardMaterial({ roughness: 0.6, metalness: 0, ...SURFACE, ...opts });
+
+// One shared material draws the wireframe of every part on top of its surface.
+const wireMaterial = new THREE.MeshBasicMaterial({
+  wireframe: true, transparent: true, depthWrite: false, toneMapped: false,
+});
+
+function collectParts(root) {
+  const meshes = [];
+  root.traverse(o => { if (o.isMesh) meshes.push(o); });
+  return meshes.map((mesh, i) => {
+    const g = mesh.geometry, pos = g.attributes.position;
+    const wire = new THREE.Mesh(g, wireMaterial);
+    wire.userData.wire = true;
+    wire.renderOrder = 1;
+    mesh.add(wire);
+    return {
+      mesh, wire,
+      name: mesh.name || mesh.parent?.name || `Part ${i + 1}`,
+      original: mesh.material,   // material(s) from the file
+      override: null,            // material of the current non-textured shading mode
+      color: new THREE.Color().setHSL((i * 0.618034) % 1, 0.65, 0.55),
+      verts: pos ? pos.count : 0,
+      tris: pos ? (g.index ? g.index.count : pos.count) / 3 : 0,
+    };
+  });
+}
+
+let checker = null;
+function checkerTexture() {
+  if (checker) return checker;
+  const N = 8, S = 128, c = document.createElement('canvas');
+  c.width = c.height = N * S;
+  const ctx = c.getContext('2d');
+  ctx.font = `600 ${S * 0.3}px "Segoe UI", sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  for (let row = 0; row < N; row++) {
+    for (let col = 0; col < N; col++) {
+      const light = (row + col) % 2 === 0;
+      ctx.fillStyle = `hsl(${col * 45} ${light ? 45 : 35}% ${light ? 72 : 38}%)`;
+      ctx.fillRect(col * S, row * S, S, S);
+      ctx.fillStyle = light ? 'rgba(0,0,0,.6)' : 'rgba(255,255,255,.75)';
+      // A1 is the cell at UV (0,0); letters run along U, numbers along V.
+      ctx.fillText('ABCDEFGH'[col] + (N - row), col * S + S / 2, row * S + S / 2);
+    }
+  }
+  checker = new THREE.CanvasTexture(c);
+  checker.colorSpace = THREE.SRGBColorSpace;
+  checker.wrapS = checker.wrapT = THREE.RepeatWrapping;
+  checker.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  return checker;
+}
+
+function applyShade() {
+  for (const p of parts) {
+    p.override?.dispose();
+    p.override = null;
+    const g = p.mesh.geometry, flatShading = !g.attributes.normal;
+    if (settings.shade === 'simple') p.override = surface({ color: 0xb8bcc2, flatShading });
+    else if (settings.shade === 'random') p.override = surface({ color: p.color, flatShading });
+    else if (settings.shade === 'checker') {
+      // Parts without UVs have nothing to show; mark them plain red.
+      p.override = surface(g.attributes.uv ? { map: checkerTexture(), flatShading } : { color: 0xa03030, flatShading });
+    }
+    p.mesh.material = p.override ?? p.original;
+  }
+  $('shade').value = settings.shade;
+  $('parts').classList.toggle('random', settings.shade === 'random');
+}
+
+function applyWire() {
+  const m = wireMaterial, mode = settings.wireColor;
+  if (mode === 'invert') {
+    // White lines blended as (1 - what is already drawn): the opposite of the
+    // surface colour under every pixel of the line.
+    m.color.set(0xffffff);
+    m.blending = THREE.CustomBlending;
+    m.blendEquation = THREE.AddEquation;
+    m.blendSrc = THREE.OneMinusDstColorFactor;
+    m.blendDst = THREE.ZeroFactor;
+    m.blendSrcAlpha = THREE.OneFactor;
+    m.blendDstAlpha = THREE.ZeroFactor;
+    // Every edge is shared by two triangles and so gets drawn twice, which would
+    // invert it back. Writing depth lets only the first of the two through.
+    m.depthWrite = true;
+    m.depthFunc = THREE.LessDepth;
+  } else {
+    m.depthWrite = false;
+    m.depthFunc = THREE.LessEqualDepth;
+    m.color.set(mode === 'white' ? 0xffffff : mode === 'custom' ? settings.wireCustom : 0x000000);
+    m.blending = THREE.NormalBlending;
+  }
+  m.needsUpdate = true;
+  for (const p of parts) p.wire.visible = settings.wire;
+  $('wire').classList.toggle('on', settings.wire);
+  $('wirecolor').value = mode;
+  $('wirecustom').value = settings.wireCustom;
+  $('wirecustom').hidden = mode !== 'custom';
+}
+
+function renderParts() {
+  const list = $('partlist');
+  list.textContent = '';
+  parts.forEach(p => {
+    const row = document.createElement('label');
+    row.className = 'part' + (p.mesh.visible ? '' : ' off');
+    row.title = p.name;
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.checked = p.mesh.visible;
+    box.onchange = () => setVisible(q => (q === p ? box.checked : q.mesh.visible));
+    row.onclick = e => {
+      if (!e.altKey) return;
+      e.preventDefault();
+      setVisible(q => q === p);
+    };
+    const swatch = document.createElement('span');
+    swatch.className = 'sw';
+    swatch.style.background = p.color.getStyle();
+    const name = document.createElement('span');
+    name.className = 'pname';
+    name.textContent = p.name;
+    const tris = document.createElement('span');
+    tris.className = 'ptris';
+    tris.textContent = fmt(p.tris);
+    row.append(box, swatch, name, tris);
+    list.append(row);
+  });
+  const shown = parts.filter(p => p.mesh.visible).length;
+  $('partcount').textContent = shown === parts.length ? `Parts (${parts.length})` : `Parts (${shown} of ${parts.length})`;
+}
+
+function setVisible(test) {
+  for (const p of parts) p.mesh.visible = !!test(p);
+  renderParts();
+  updateStats();
+}
+
+function showPartsPanel() {
+  $('parts').hidden = !settings.parts;
+  $('partsbtn').classList.toggle('on', settings.parts);
 }
 
 function updateStats() {
-  let meshes = 0, tris = 0, verts = 0;
-  model.traverse(o => {
-    if (!o.isMesh) return;
-    meshes++;
-    const g = o.geometry, pos = g.attributes.position;
-    if (!pos) return;
-    verts += pos.count;
-    tris += (g.index ? g.index.count : pos.count) / 3;
-  });
-  const n = v => Math.round(v).toLocaleString('en-US');
-  $('stats').textContent = `${n(meshes)} meshes · ${n(tris)} triangles · ${n(verts)} vertices`;
+  const shown = parts.filter(p => p.mesh.visible);
+  const sum = key => shown.reduce((n, p) => n + p[key], 0);
+  const count = shown.length === parts.length ? fmt(parts.length) : `${fmt(shown.length)} of ${fmt(parts.length)}`;
+  $('stats').textContent = `${count} parts · ${fmt(sum('tris'))} triangles · ${fmt(sum('verts'))} vertices`;
 }
 
 // ---------- loading ----------
@@ -266,9 +475,9 @@ async function loadModel(name, data, files = new Map(), basePath = '') {
     if (/^(blob|data):/i.test(url)) return url;
     return files.get(baseName(url)) ?? url;
   });
-  let pending = false, root = null;
+  let pending = false, root = null, materials = null;
   manager.onStart = () => (pending = true);
-  manager.onLoad = () => { pending = false; if (root) dropBrokenTextures(root); };
+  manager.onLoad = () => { pending = false; if (materials) dropBrokenTextures(materials); };
 
   if (/\.fbx$/i.test(name)) {
     root = new FBXLoader(manager).parse(data, basePath);
@@ -305,11 +514,13 @@ async function loadModel(name, data, files = new Map(), basePath = '') {
   }
 
   // Viewer-friendly material fixes.
+  materials = [];
   eachMaterial(root, m => {
-    m.side = THREE.DoubleSide;
+    materials.push(m);
+    Object.assign(m, SURFACE);
     if (m.transparent && m.opacity === 0) { m.opacity = 1; m.transparent = false; }
   });
-  if (!pending) dropBrokenTextures(root);
+  if (!pending) dropBrokenTextures(materials);
 
   let hasGeometry = false;
   root.traverse(o => { if (o.geometry?.attributes?.position?.count) hasGeometry = true; });
@@ -326,7 +537,10 @@ async function loadModel(name, data, files = new Map(), basePath = '') {
     if (Array.isArray(saved) && saved.length === 4) model.quaternion.fromArray(saved);
   } catch {}
   scene.add(model);
-  applyWireframe();
+  parts = collectParts(root);
+  applyShade();
+  applyWire();
+  renderParts();
   buildGrid();
   frame();
   updateStats();
@@ -392,16 +606,40 @@ async function openUrl(url) {
 $('open').onclick = () => $('file').click();
 $('file').onchange = e => { openFiles(e.target.files); e.target.value = ''; };
 $('frame').onclick = frame;
-$('wire').onclick = () => { state.wireframe = !state.wireframe; applyWireframe(); };
-$('grid').onclick = () => {
-  state.grid = !state.grid;
-  if (grid) grid.visible = state.grid;
-  $('grid').classList.toggle('on', state.grid);
+const setShade = mode => { settings.shade = mode; applyShade(); saveSettings(); };
+$('shade').onchange = e => { setShade(e.target.value); e.target.blur(); };
+$('wire').onclick = () => { settings.wire = !settings.wire; applyWire(); saveSettings(); };
+$('wirecolor').onchange = e => {
+  settings.wireColor = e.target.value;
+  settings.wire = true;   // picking a colour is a request to see it
+  applyWire();
+  saveSettings();
+  e.target.blur();
 };
+$('wirecustom').oninput = e => { settings.wireCustom = e.target.value; applyWire(); saveSettings(); };
+$('grid').onclick = () => {
+  settings.grid = !settings.grid;
+  if (grid) grid.visible = settings.grid;
+  $('grid').classList.toggle('on', settings.grid);
+  saveSettings();
+};
+$('partsbtn').onclick = () => { settings.parts = !settings.parts; showPartsPanel(); saveSettings(); };
+$('pall').onclick = () => setVisible(() => true);
+$('pnone').onclick = () => setVisible(() => false);
+$('pinv').onclick = () => setVisible(p => !p.mesh.visible);
+
+$('grid').classList.toggle('on', settings.grid);
+showPartsPanel();
+applyShade();
+applyWire();
 
 addEventListener('keydown', e => {
   if (e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.target.tagName === 'SELECT' || e.target.tagName === 'INPUT') return;
   const k = e.key.toLowerCase();
+  const shadeKey = { 1: 'textured', 2: 'simple', 3: 'random', 4: 'checker' }[k];
+  if (shadeKey) return setShade(shadeKey);
+  if (k === 'p') return $('partsbtn').click();
   if (k === 'f') frame();
   else if (k === 'w') $('wire').click();
   else if (k === 'g') $('grid').click();
@@ -425,7 +663,7 @@ addEventListener('drop', e => {
 window.viewer = { THREE, renderer, scene, camera, controls, frame, rotate, get model() { return model; } };
 
 // viewer.html?src=path/or/url/to/model.fbx
-const src = new URLSearchParams(location.search).get('src');
+const src = query.get('src');
 if (src) openUrl(src);
 </script>
 </body>

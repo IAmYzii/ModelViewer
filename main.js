@@ -92,9 +92,22 @@ function createWindow(modelPath) {
   // Dropping a non-model file must not navigate the window away from the viewer.
   win.webContents.on('will-navigate', e => e.preventDefault());
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-  win.loadURL('app://app/viewer.html' + (modelPath ? `?src=${encodeURIComponent(diskUrl(modelPath))}` : ''));
+  // --shade=textured|simple|random|checker  --wire=black|white|invert|custom  --parts
+  const params = new URLSearchParams();
+  if (modelPath) params.set('src', diskUrl(modelPath));
+  for (const name of ['shade', 'wire']) {
+    const value = argValue(process.argv, name);
+    if (value) params.set(name, value);
+  }
+  if (process.argv.includes('--parts')) params.set('parts', '1');
+  win.loadURL('app://app/viewer.html?' + params);
   return win;
 }
+
+// A development run (npm start) keeps its own profile, so it neither hands its
+// file over to an installed Model Viewer that happens to be open nor shares its
+// saved settings.
+if (!app.isPackaged) app.setPath('userData', path.join(app.getPath('appData'), 'Model Viewer (dev)'));
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();

@@ -7,7 +7,10 @@ the discontinued 3D Viewer.
 - Left drag rotates, right drag pans, wheel zooms toward the cursor
 - Picks up textures and `.mtl` files next to the model (also from folders such
   as `textures`, `tex`, `maps`, `materials`)
-- Wireframe (`W`), floor grid (`G`), frame model (`F`)
+- Shading modes: textured, simple, random color per part, UV checker (`1`–`4`)
+- Wireframe overlay (`W`) in black, white, inverted surface color or a custom color
+- Parts panel (`P`): show/hide parts, Alt+click to show only one
+- Floor grid (`G`), frame model (`F`)
 - Rotate 90° around X / Y / Z (`X`, `Y`, `Z`, Shift reverses) to fix badly
   oriented exports; the fix is remembered per file name
 
@@ -35,4 +38,5 @@ npm start -- path\to\model.fbx
 CDN); drop a model onto the page.
 
 `ModelViewer.exe model.fbx --screenshot=out.png` renders the model to a PNG and
-exits.
+exits. `--shade=textured|simple|random|checker`, `--wire=black|white|invert|custom`
+and `--parts` set the view from the command line.
