@@ -474,14 +474,34 @@ function buildGrid() {
   const size = box.getSize(new V3());
   const center = box.getCenter(new V3());
   const span = Math.max(size.x, size.z, size.y * 0.5) || 1;
-  const cell = Math.pow(10, Math.floor(Math.log10(span))) / 2;
-  const cells = Math.ceil((span * 2) / cell / 2) * 2;
+  const cell = gridCell();
+  const cells = Math.max(2, Math.ceil((span * 2) / cell / 2) * 2);
   grid = new THREE.GridHelper(cells * cell, cells, 0x8a9099, 0x5a6068);
   grid.material.transparent = true;
   grid.material.opacity = 0.45;
-  grid.position.set(center.x, box.min.y, center.z);
+  // Lines fall on whole multiples of the cell size, where the cube is placed too.
+  const snap = v => Math.round(v / cell) * cell;
+  grid.position.set(snap(center.x), box.min.y, snap(center.z));
   grid.visible = settings.grid;
   scene.add(grid);
+}
+
+// Size of one grid cell in file units: exactly one metre whenever that gives a
+// usable grid. Only for very small or very large models does it step down or
+// up by factors of ten (10 cm, 1 cm … or 10 m, 100 m …).
+function gridCell() {
+  const metre = 1 / UNITS[unitKey()][0];
+  const size = modelBox.getSize(new V3());
+  const span = Math.max(size.x, size.z, size.y * 0.5) || metre;
+  let power = Math.min(0, Math.floor(Math.log10(span / (2 * metre))));   // fewer than 2 cells: finer
+  power = Math.max(power, Math.ceil(Math.log10((span * 2) / (120 * metre))));   // over 120 cells: coarser
+  return metre * Math.pow(10, power);
+}
+
+function gridLabel() {
+  const metres = gridCell() * UNITS[unitKey()][0];
+  if (metres >= 1) return `${num(metres)} m`;
+  return metres >= 0.01 ? `${num(metres * 100)} cm` : `${num(metres * 1000)} mm`;
 }
 
 // A cube of exactly one metre standing on the floor next to the model.
@@ -498,8 +518,12 @@ function buildCube() {
     })),
     new THREE.LineSegments(new THREE.EdgesGeometry(geo), new THREE.LineBasicMaterial({ color: 0xffc27a })),
   );
-  const gap = Math.max(s, size.x) * 0.15;
-  cube.position.set(modelBox.max.x + gap + s / 2, modelBox.min.y + s / 2, center.z);
+  // Stand it in a grid cell beside the model, edges on the grid lines.
+  const step = Math.max(s, gridCell());
+  const gap = Math.max(s, size.x) * 0.1;
+  const minX = Math.ceil((modelBox.max.x + gap) / step) * step;
+  const minZ = Math.round((center.z - s / 2) / step) * step;
+  cube.position.set(minX + s / 2, modelBox.min.y + s / 2, minZ + s / 2);
   cube.updateMatrixWorld(true);
   scene.add(cube);
 }
@@ -827,7 +851,8 @@ function updateStats() {
   const shown = parts.filter(p => p.mesh.visible);
   const sum = key => shown.reduce((n, p) => n + p[key], 0);
   const count = shown.length === parts.length ? fmt(parts.length) : `${fmt(shown.length)} of ${fmt(parts.length)}`;
-  $('stats').textContent = `${count} parts · ${fmt(sum('tris'))} triangles · ${fmt(sum('verts'))} vertices`;
+  $('stats').textContent =
+    `${count} parts · ${fmt(sum('tris'))} triangles · ${fmt(sum('verts'))} vertices · grid ${gridLabel()}`;
 }
 
 const UV_SETS = ['uv', 'uv1', 'uv2', 'uv3'];
@@ -1413,6 +1438,7 @@ $('units').onchange = e => {
   buildGrid();
   if (cube) frame();
   renderInfo();
+  updateStats();
 };
 $('defset').onclick = () => {
   if (!model) return;
