@@ -1,4 +1,4 @@
-const { app, BrowserWindow, protocol, Menu } = require('electron');
+const { app, BrowserWindow, protocol, Menu, ipcMain, clipboard, nativeImage } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 
@@ -39,7 +39,10 @@ async function resolveDiskFile(p) {
 async function respondWithFile(file) {
   const ext = path.extname(file).slice(1).toLowerCase();
   const data = await fs.promises.readFile(file);
-  return new Response(data, { headers: { 'content-type': MIME[ext] ?? 'application/octet-stream' } });
+  // no-store: a model that is re-exported must not come back from a cache.
+  return new Response(data, {
+    headers: { 'content-type': MIME[ext] ?? 'application/octet-stream', 'cache-control': 'no-store' },
+  });
 }
 
 async function handleRequest(request) {
@@ -81,6 +84,34 @@ function argValue(argv, name) {
   return hit ? hit.slice(name.length + 3) : null;
 }
 
+// Each window may watch the one file it shows and is told when it was rewritten.
+const watchers = new Map();   // webContents id -> { file, listener }
+function unwatch(id) {
+  const w = watchers.get(id);
+  if (!w) return;
+  fs.unwatchFile(w.file, w.listener);
+  watchers.delete(id);
+}
+ipcMain.on('watch-file', (event, file) => {
+  const sender = event.sender, id = sender.id;
+  unwatch(id);
+  if (typeof file !== 'string' || !file) return;
+  let timer = null;
+  const listener = (cur, prev) => {
+    if (!cur.size || (cur.mtimeMs === prev.mtimeMs && cur.size === prev.size)) return;
+    // Exporters write in several steps; wait until the file has been quiet.
+    clearTimeout(timer);
+    timer = setTimeout(() => { if (!sender.isDestroyed()) sender.send('file-changed', file); }, 400);
+  };
+  fs.watchFile(file, { interval: 500 }, listener);
+  watchers.set(id, { file, listener });
+});
+ipcMain.on('copy-image', (_event, dataUrl) => {
+  if (typeof dataUrl === 'string' && dataUrl.startsWith('data:image/png')) {
+    clipboard.writeImage(nativeImage.createFromDataURL(dataUrl));
+  }
+});
+
 function createWindow(modelPath) {
   const win = new BrowserWindow({
     width: 1280, height: 800, backgroundColor: '#1c1e22', title: 'Model Viewer',
@@ -92,14 +123,18 @@ function createWindow(modelPath) {
   // Dropping a non-model file must not navigate the window away from the viewer.
   win.webContents.on('will-navigate', e => e.preventDefault());
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-  // --shade=textured|simple|random|checker  --wire=black|white|invert|custom  --parts
+  const contentsId = win.webContents.id;
+  win.webContents.on('destroyed', () => unwatch(contentsId));
+  // Switches that set up the view, see README.
   const params = new URLSearchParams();
   if (modelPath) params.set('src', diskUrl(modelPath));
-  for (const name of ['shade', 'wire']) {
+  for (const name of ['shade', 'wire', 'vc', 'explode', 'select']) {
     const value = argValue(process.argv, name);
     if (value) params.set(name, value);
   }
-  if (process.argv.includes('--parts')) params.set('parts', '1');
+  for (const flag of ['parts', 'info', 'cube', 'normals']) {
+    if (process.argv.includes('--' + flag)) params.set(flag, '1');
+  }
   win.loadURL('app://app/viewer.html?' + params);
   return win;
 }
@@ -127,7 +162,8 @@ if (!app.requestSingleInstanceLock()) {
       const capture = async () => {
         if (done) return;
         done = true;
-        await new Promise(r => setTimeout(r, 1500));
+        // VIEWER_SHOT_DELAY (ms) postpones the capture, for scripted checks.
+        await new Promise(r => setTimeout(r, Number(process.env.VIEWER_SHOT_DELAY) || 1500));
         const image = await win.webContents.capturePage();
         fs.writeFileSync(path.resolve(shot), image.toPNG());
         app.quit();

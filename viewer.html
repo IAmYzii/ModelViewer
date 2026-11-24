@@ -7,8 +7,9 @@
 <style>
   :root {
     --bg-top: #3a3f47; --bg-bottom: #1c1e22;
-    --panel: rgba(24, 26, 30, .82); --border: rgba(255, 255, 255, .12);
+    --panel: rgba(24, 26, 30, .86); --border: rgba(255, 255, 255, .12);
     --text: #e8eaed; --muted: #9aa0a8; --accent: #4c9dff;
+    --top: 52px; /* bottom edge of the toolbar, kept in sync by script */
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; overflow: hidden; }
@@ -23,43 +24,71 @@
     align-items: center; pointer-events: none;
   }
   #bar > * { pointer-events: auto; }
-  button {
+  button, select {
     background: var(--panel); color: var(--text); border: 1px solid var(--border);
-    border-radius: 6px; padding: 6px 12px; font: inherit; cursor: pointer;
-    backdrop-filter: blur(6px);
+    border-radius: 6px; padding: 6px 9px; font: inherit; cursor: pointer;
   }
-  button:hover { border-color: rgba(255, 255, 255, .3); }
+  button { backdrop-filter: blur(6px); }
+  button:hover, select:hover { border-color: rgba(255, 255, 255, .3); }
   button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
-  button kbd { opacity: .55; font: inherit; margin-left: 6px; }
-  select {
-    background: var(--panel); color: var(--text); border: 1px solid var(--border);
-    border-radius: 6px; padding: 6px 8px; font: inherit; cursor: pointer;
-  }
+  kbd { opacity: .55; font: inherit; margin-left: 6px; }
+  select { padding: 6px 6px; }
   select option { background: #24272c; }
   input[type=color] {
     width: 30px; height: 30px; padding: 2px; border: 1px solid var(--border);
     border-radius: 6px; background: var(--panel); cursor: pointer;
   }
-  .sep { width: 1px; height: 20px; background: var(--border); margin: 0 3px; }
-  #parts {
-    position: fixed; top: 52px; right: 10px; bottom: 40px; width: 270px;
+  .sep { width: 1px; height: 20px; background: var(--border); margin: 0 2px; }
+  .slider {
+    display: flex; align-items: center; gap: 6px; background: var(--panel);
+    border: 1px solid var(--border); border-radius: 6px; padding: 4px 10px; height: 31px;
+  }
+  .slider input { width: 70px; accent-color: var(--accent); }
+  #name { margin-left: 6px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .panel {
+    position: fixed; top: var(--top); bottom: 40px; width: 280px;
     display: flex; flex-direction: column; background: var(--panel);
     border: 1px solid var(--border); border-radius: 8px; backdrop-filter: blur(6px);
   }
-  #parts[hidden] { display: none; }
-  #parts .head { display: flex; gap: 4px; align-items: center; padding: 8px; border-bottom: 1px solid var(--border); }
-  #parts .head b { flex: 1; }
-  #parts .head button { padding: 3px 8px; }
-  #partlist { flex: 1; overflow-y: auto; padding: 4px 0; }
-  #parts .foot { padding: 6px 8px; color: var(--muted); border-top: 1px solid var(--border); font-size: 12px; }
+  .panel[hidden], #viewmenu[hidden] { display: none; }
+  .panel .head { display: flex; gap: 4px; align-items: center; padding: 8px; border-bottom: 1px solid var(--border); }
+  .panel .head b { flex: 1; }
+  .panel button { padding: 3px 8px; }
+  .panel .body { flex: 1; overflow-y: auto; padding: 4px 0; }
+  .panel .foot { padding: 6px 8px; color: var(--muted); border-top: 1px solid var(--border); font-size: 12px; }
+  #parts { right: 10px; }
+  #info { left: 10px; user-select: text; }
+
   .part { display: flex; gap: 6px; align-items: center; padding: 3px 8px; cursor: pointer; }
   .part:hover { background: rgba(255, 255, 255, .07); }
+  .part.sel { background: rgba(76, 157, 255, .3); }
   .part.off .pname { color: var(--muted); text-decoration: line-through; }
   .part .pname { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .part .ptris { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 12px; }
   .part .sw { width: 10px; height: 10px; border-radius: 2px; display: none; flex: none; }
   #parts.random .sw { display: block; }
-  #name { margin-left: 8px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .irow { display: flex; gap: 8px; padding: 2px 10px; }
+  .irow .k { color: var(--muted); flex: none; width: 92px; }
+  .irow .v { flex: 1; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+  .ihead { padding: 8px 10px 3px; font-weight: 600; border-top: 1px solid var(--border); margin-top: 6px; }
+  .ihead:first-child { border-top: 0; margin-top: 0; }
+  .ihint { padding: 4px 10px; color: var(--muted); }
+  .ibtns { display: flex; gap: 6px; padding: 6px 10px; }
+
+  #viewmenu {
+    position: fixed; z-index: 5; width: 250px; padding: 6px 0; background: #1d2024;
+    border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 24px rgba(0, 0, 0, .4);
+  }
+  #viewmenu label, #viewmenu .row { display: flex; align-items: center; gap: 8px; padding: 5px 12px; }
+  #viewmenu label { cursor: pointer; }
+  #viewmenu label:hover { background: rgba(255, 255, 255, .07); }
+  #viewmenu label span, #viewmenu .row span { flex: 1; }
+  #viewmenu hr { border: 0; border-top: 1px solid var(--border); margin: 6px 0; }
+  #viewmenu button, #viewmenu select { padding: 3px 8px; }
+  #viewmenu input { accent-color: var(--accent); }
+
   #stats {
     position: fixed; left: 12px; bottom: 10px; color: var(--muted);
     font-variant-numeric: tabular-nums; pointer-events: none;
@@ -76,10 +105,11 @@
   }
   body.dragging #drop { display: block; }
   #toast {
-    position: fixed; left: 50%; top: 56px; transform: translateX(-50%);
-    background: #7a2b2b; border: 1px solid #b44; border-radius: 6px; padding: 8px 14px;
+    position: fixed; left: 50%; bottom: 44px; transform: translateX(-50%); z-index: 6;
+    background: #23262b; border: 1px solid var(--border); border-radius: 6px; padding: 8px 14px;
     max-width: 80vw; display: none; user-select: text;
   }
+  #toast.error { background: #7a2b2b; border-color: #b44; }
   #busy { position: fixed; inset: 0; display: none; place-items: center; background: rgba(0, 0, 0, .35); font-size: 16px; }
 </style>
 <script type="importmap">
@@ -93,16 +123,26 @@
 <canvas id="view" tabindex="0"></canvas>
 
 <div id="bar">
-  <button id="open">Open…</button>
-  <button id="frame">Frame<kbd>F</kbd></button>
+  <button id="open" title="Open a model (O)">Open…</button>
+  <button id="frame" title="Frame the model">Frame<kbd>F</kbd></button>
   <span class="sep"></span>
-  <select id="shade" title="Shading (keys 1–4)">
+  <select id="shade" title="Shading (keys 1–7)">
     <option value="textured">Textured</option>
     <option value="simple">Simple</option>
     <option value="random">Random colors</option>
     <option value="checker">UV checker</option>
+    <option value="vertex">Vertex colors</option>
+    <option value="faces">Face orientation</option>
+    <option value="normals">Normals</option>
   </select>
-  <button id="wire">Wireframe<kbd>W</kbd></button>
+  <select id="vcchan" title="Vertex color channel" hidden>
+    <option value="rgb">RGB</option>
+    <option value="r">Red</option>
+    <option value="g">Green</option>
+    <option value="b">Blue</option>
+    <option value="a">Alpha</option>
+  </select>
+  <button id="wire" title="Wireframe overlay">Wireframe<kbd>W</kbd></button>
   <select id="wirecolor" title="Wireframe color">
     <option value="black">Black</option>
     <option value="white">White</option>
@@ -110,31 +150,64 @@
     <option value="custom">Custom…</option>
   </select>
   <input id="wirecustom" type="color" title="Custom wireframe color" hidden>
-  <button id="grid">Grid<kbd>G</kbd></button>
-  <button id="partsbtn">Parts<kbd>P</kbd></button>
   <span class="sep"></span>
-  <button id="rotx" title="Rotate 90° around X (Shift: other way)">Rotate X<kbd>X</kbd></button>
-  <button id="roty" title="Rotate 90° around Y (Shift: other way)">Rotate Y<kbd>Y</kbd></button>
-  <button id="rotz" title="Rotate 90° around Z (Shift: other way)">Rotate Z<kbd>Z</kbd></button>
+  <label class="slider" title="Push parts away from the center">Explode
+    <input id="explode" type="range" min="0" max="100" value="0"></label>
+  <span class="sep"></span>
+  <button id="rotx" title="Rotate 90° around X (Shift: other way)">Rot X</button>
+  <button id="roty" title="Rotate 90° around Y (Shift: other way)">Rot Y</button>
+  <button id="rotz" title="Rotate 90° around Z (Shift: other way)">Rot Z</button>
+  <span class="sep"></span>
+  <button id="partsbtn" title="Parts list">Parts<kbd>P</kbd></button>
+  <button id="infobtn" title="Model information">Info<kbd>I</kbd></button>
+  <button id="shot" title="Copy a screenshot to the clipboard (Ctrl+C). Shift+click or Ctrl+S saves a PNG.">Screenshot</button>
+  <button id="viewbtn" title="View options">View ▾</button>
   <span id="name"></span>
 </div>
 
-<div id="empty"><div><b>Drop an .fbx or .obj file here</b>or click Open. Drop textures / .mtl together with the model to use them.</div></div>
-<div id="parts" hidden>
+<div id="viewmenu" hidden>
+  <label><input id="grid" type="checkbox"><span>Floor grid</span><kbd>G</kbd></label>
+  <label><input id="cube" type="checkbox"><span>1 m reference cube</span><kbd>M</kbd></label>
+  <label><input id="normals" type="checkbox"><span>Vertex normals</span><kbd>N</kbd></label>
+  <label id="reloadrow"><input id="autoreload" type="checkbox"><span>Reload when the file changes</span></label>
+  <hr>
+  <div class="row"><span>One file unit is</span>
+    <select id="units">
+      <option value="auto">Auto</option>
+      <option value="m">1 m</option>
+      <option value="cm">1 cm</option>
+      <option value="mm">1 mm</option>
+      <option value="in">1 inch</option>
+    </select>
+  </div>
+  <hr>
+  <div class="row"><span>Rotation for new files: <b id="defrot">as in file</b></span></div>
+  <div class="row"><button id="defset">Use current</button><button id="defclear">Clear</button></div>
+</div>
+
+<div id="info" class="panel" hidden>
+  <div class="head"><b>Info</b></div>
+  <div id="infobody" class="body"></div>
+</div>
+
+<div id="parts" class="panel" hidden>
   <div class="head">
     <b id="partcount">Parts</b>
     <button id="pall">All</button><button id="pnone">None</button><button id="pinv">Invert</button>
   </div>
-  <div id="partlist"></div>
-  <div class="foot">Alt+click a part to show only that one</div>
+  <div id="partlist" class="body"></div>
+  <div class="foot">Click: select · Alt+click: show only that part</div>
 </div>
+
+<div id="empty"><div><b>Drop an .fbx or .obj file here</b>or click Open. Drop textures / .mtl together with the model to use them.</div></div>
 <div id="stats"></div>
-<div id="help">Left drag: rotate · Right drag: pan · Wheel: zoom</div>
+<div id="help">Left drag: rotate · Right drag: pan · Wheel: zoom · Click: select part</div>
 <div id="drop"></div>
 <div id="toast"></div>
 <div id="busy">Loading…</div>
 <input id="file" type="file" multiple hidden
        accept=".fbx,.obj,.mtl,.png,.jpg,.jpeg,.bmp,.gif,.webp,.tga">
+<input id="texfile" type="file" hidden accept=".png,.jpg,.jpeg,.bmp,.gif,.webp,.tga">
 
 <script type="module">
 import * as THREE from 'three';
@@ -146,6 +219,8 @@ import { TGALoader } from 'three/addons/loaders/TGALoader.js';
 
 const $ = id => document.getElementById(id);
 const canvas = $('view');
+const host = window.viewerHost ?? null;   // present only inside the desktop app
+const V3 = THREE.Vector3;
 
 // ---------- scene ----------
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
@@ -168,23 +243,42 @@ controls.dampingFactor = 0.12;
 controls.zoomToCursor = true;
 
 let grid = null;
-let model = null;
+let cube = null;       // the 1 m reference cube
+let model = null;      // holder group; carries the orientation fix
+let root = null;       // what the loader returned, child of `model`
+let parts = [];        // one entry per mesh of the loaded model, see collectParts()
+let selected = null;   // the selected part
+let current = null;    // where the model came from: { name, files, basePath, diskPath, url }
+let explode = 0;       // 0 = assembled
 let radius = 1;
-let parts = [];   // one entry per mesh of the loaded model, see collectParts()
+const modelBox = new THREE.Box3();   // world bounds of the assembled model
 
-// View settings, remembered between runs. URL parameters (?shade=…&wire=…&parts)
-// override them, which the desktop app uses for its command-line switches.
-const settings = { shade: 'textured', wire: false, wireColor: 'black', wireCustom: '#ff8800', grid: true, parts: false };
+// View settings, remembered between runs. URL parameters override them, which
+// the desktop app uses for its command-line switches.
+const settings = {
+  shade: 'textured', vcChannel: 'rgb', wire: false, wireColor: 'black', wireCustom: '#ff8800',
+  grid: true, cube: false, normals: false, parts: false, info: false,
+  units: 'auto', defaultRot: null, autoReload: true,
+};
 try { Object.assign(settings, JSON.parse(localStorage.getItem('settings')) ?? {}); } catch {}
 const query = new URLSearchParams(location.search);
 if (query.has('shade')) settings.shade = query.get('shade');
+if (query.has('vc')) settings.vcChannel = query.get('vc');
 if (query.has('wire')) { settings.wire = true; settings.wireColor = query.get('wire') || settings.wireColor; }
-if (query.has('parts')) settings.parts = true;
-if (!['textured', 'simple', 'random', 'checker'].includes(settings.shade)) settings.shade = 'textured';
+for (const flag of ['parts', 'info', 'cube', 'normals']) if (query.has(flag)) settings[flag] = true;
+const SHADES = ['textured', 'simple', 'random', 'checker', 'vertex', 'faces', 'normals'];
+if (!SHADES.includes(settings.shade)) settings.shade = 'textured';
 if (!['black', 'white', 'invert', 'custom'].includes(settings.wireColor)) settings.wireColor = 'black';
+if (!['rgb', 'r', 'g', 'b', 'a'].includes(settings.vcChannel)) settings.vcChannel = 'rgb';
 function saveSettings() {
   try { localStorage.setItem('settings', JSON.stringify(settings)); } catch {}
 }
+
+// File units. FBX files are almost always in centimetres, OBJ in metres.
+const UNITS = { m: [1, 'm'], cm: [0.01, 'cm'], mm: [0.001, 'mm'], in: [0.0254, 'in'] };
+if (settings.units !== 'auto' && !UNITS[settings.units]) settings.units = 'auto';
+const unitKey = () =>
+  settings.units === 'auto' ? (/\.fbx$/i.test(current?.name ?? '') ? 'cm' : 'm') : settings.units;
 
 function resize() {
   const w = innerWidth, h = innerHeight;
@@ -195,6 +289,9 @@ function resize() {
 }
 addEventListener('resize', resize);
 resize();
+new ResizeObserver(() => {
+  document.documentElement.style.setProperty('--top', $('bar').offsetHeight + 20 + 'px');
+}).observe($('bar'));
 
 renderer.setAnimationLoop(() => {
   controls.update();
@@ -202,13 +299,17 @@ renderer.setAnimationLoop(() => {
 });
 
 // ---------- helpers ----------
-function eachMaterial(root, fn) {
-  root.traverse(o => {
-    if (!o.material || o.userData.wire) return;
+const asArray = v => (Array.isArray(v) ? v : [v]);
+const fmt = v => Math.round(v).toLocaleString('en-US');
+const num = v => String(Number(v.toPrecision(4)));
+
+// Materials of the model itself; the viewer's own overlays are skipped.
+function eachMaterial(obj, fn) {
+  obj.traverse(o => {
+    if (!o.material || o.userData.overlay) return;
     asArray(o.material).forEach(m => fn(m, o));
   });
 }
-const asArray = v => (Array.isArray(v) ? v : [v]);
 
 const TEX_SLOTS = ['map', 'normalMap', 'bumpMap', 'specularMap', 'emissiveMap', 'alphaMap',
   'aoMap', 'displacementMap', 'roughnessMap', 'metalnessMap'];
@@ -222,36 +323,64 @@ function dropBrokenTextures(materials) {
   }
 }
 
-function disposeModel(root) {
-  root.traverse(o => o.geometry?.dispose());
+function disposeModel(obj) {
+  obj.traverse(o => o.geometry?.dispose());
   const disposeMaterial = m => {
-    for (const k of TEX_SLOTS) m[k]?.dispose();
+    for (const k of TEX_SLOTS) if (m[k] !== checker) m[k]?.dispose();
     m.dispose();
   };
-  eachMaterial(root, disposeMaterial);           // whatever is on the meshes now
+  eachMaterial(obj, disposeMaterial);             // whatever is on the meshes now
   for (const p of parts) {
     asArray(p.original).forEach(disposeMaterial); // the file's own materials
     p.override?.dispose();
+    p.customMap?.dispose();
   }
 }
 
-function toast(msg) {
+function toast(msg, kind = 'error') {
   const t = $('toast');
   t.textContent = msg;
+  t.className = kind;
   t.style.display = 'block';
   clearTimeout(toast.timer);
-  toast.timer = setTimeout(() => (t.style.display = 'none'), 6000);
+  toast.timer = setTimeout(() => (t.style.display = 'none'), kind === 'error' ? 6000 : 2200);
+}
+
+// ---------- bounds, framing, grid, reference cube ----------
+// Measure the assembled model (explode temporarily undone).
+function measure() {
+  applyExplode(0);
+  model.updateMatrixWorld(true);
+  modelBox.makeEmpty();
+  const tmp = new THREE.Box3();
+  for (const p of parts) modelBox.union(tmp.copy(geometryBox(p)).applyMatrix4(p.mesh.matrixWorld));
+  if (modelBox.isEmpty()) modelBox.setFromObject(model);
+  applyExplode(explode);
+  model.updateMatrixWorld(true);
+}
+
+function geometryBox(p) {
+  const g = p.mesh.geometry;
+  if (!g.boundingBox) g.computeBoundingBox();
+  return g.boundingBox;
+}
+
+// What should fit on screen: the model plus the reference cube when shown.
+function viewBox() {
+  const box = modelBox.clone();
+  if (cube) box.expandByObject(cube);
+  return box;
 }
 
 function frame() {
   if (!model) return;
-  const box = new THREE.Box3().setFromObject(model);
+  const box = viewBox();
   if (box.isEmpty()) return;
-  const center = box.getCenter(new THREE.Vector3());
-  radius = box.getSize(new THREE.Vector3()).length() / 2 || 1;
+  const center = box.getCenter(new V3());
+  radius = box.getSize(new V3()).length() / 2 || 1;
   const fitV = radius / Math.sin(THREE.MathUtils.degToRad(camera.fov / 2));
   const dist = Math.max(fitV, fitV / Math.min(camera.aspect, 1)) * 1.05;
-  const dir = new THREE.Vector3(1, 0.6, 1).normalize();
+  const dir = new V3(1, 0.6, 1).normalize();
   camera.position.copy(center).addScaledVector(dir, dist);
   camera.near = radius / 200;
   camera.far = radius * 400;
@@ -262,13 +391,18 @@ function frame() {
   controls.update();
 }
 
+function disposeHelper(obj) {
+  scene.remove(obj);
+  obj.traverse(o => { o.geometry?.dispose(); o.material?.dispose(); });
+}
+
 function buildGrid() {
-  if (grid) { scene.remove(grid); grid.geometry.dispose(); grid.material.dispose(); grid = null; }
+  if (grid) { disposeHelper(grid); grid = null; }
   if (!model) return;
-  const box = new THREE.Box3().setFromObject(model);
+  const box = viewBox();
   if (box.isEmpty()) return;
-  const size = box.getSize(new THREE.Vector3());
-  const center = box.getCenter(new THREE.Vector3());
+  const size = box.getSize(new V3());
+  const center = box.getCenter(new V3());
   const span = Math.max(size.x, size.z, size.y * 0.5) || 1;
   const cell = Math.pow(10, Math.floor(Math.log10(span))) / 2;
   const cells = Math.ceil((span * 2) / cell / 2) * 2;
@@ -280,32 +414,70 @@ function buildGrid() {
   scene.add(grid);
 }
 
+// A cube of exactly one metre standing on the floor next to the model.
+function buildCube() {
+  if (cube) { disposeHelper(cube); cube = null; }
+  if (!model || !settings.cube || modelBox.isEmpty()) return;
+  const s = 1 / UNITS[unitKey()][0];
+  const size = modelBox.getSize(new V3()), center = modelBox.getCenter(new V3());
+  const geo = new THREE.BoxGeometry(s, s, s);
+  cube = new THREE.Group();
+  cube.add(
+    new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
+      color: 0xffa53d, roughness: 0.6, transparent: true, opacity: 0.35, depthWrite: false,
+    })),
+    new THREE.LineSegments(new THREE.EdgesGeometry(geo), new THREE.LineBasicMaterial({ color: 0xffc27a })),
+  );
+  const gap = Math.max(s, size.x) * 0.15;
+  cube.position.set(modelBox.max.x + gap + s / 2, modelBox.min.y + s / 2, center.z);
+  cube.updateMatrixWorld(true);
+  scene.add(cube);
+}
+
+// Call after anything that changes the model's bounds or the helpers around it.
+function refreshScene(reframe) {
+  measure();
+  buildCube();
+  buildGrid();
+  if (reframe) frame();
+  renderInfo();
+}
+
+// ---------- orientation ----------
 // Turn the model 90° around a world axis; the choice is remembered per file name.
 let modelKey = '';
-const AXES = { x: new THREE.Vector3(1, 0, 0), y: new THREE.Vector3(0, 1, 0), z: new THREE.Vector3(0, 0, 1) };
+const AXES = { x: new V3(1, 0, 0), y: new V3(0, 1, 0), z: new V3(0, 0, 1) };
 function rotate(axis, reverse = false) {
   if (!model) return;
   const q = new THREE.Quaternion().setFromAxisAngle(AXES[axis], (reverse ? -1 : 1) * Math.PI / 2);
   model.quaternion.premultiply(q).normalize();
-  model.updateMatrixWorld(true);
-  try {
-    const identity = Math.abs(model.quaternion.w) > 0.9999;
-    if (identity) localStorage.removeItem(modelKey);
-    else localStorage.setItem(modelKey, JSON.stringify(model.quaternion.toArray()));
-  } catch {}
+  try { localStorage.setItem(modelKey, JSON.stringify(model.quaternion.toArray())); } catch {}
   // Keep the current viewing direction and distance, just re-centre on the model.
   const offset = camera.position.clone().sub(controls.target);
-  buildGrid();
-  const center = new THREE.Box3().setFromObject(model).getCenter(new THREE.Vector3());
+  refreshScene(false);
+  const center = viewBox().getCenter(new V3());
   controls.target.copy(center);
   camera.position.copy(center).add(offset);
   controls.update();
 }
 
-// ---------- parts, shading, wireframe ----------
-const fmt = v => Math.round(v).toLocaleString('en-US');
+function initialRotation(name) {
+  modelKey = 'rot:' + name.toLowerCase();
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem(modelKey)); } catch {}
+  const q = Array.isArray(saved) && saved.length === 4 ? saved : settings.defaultRot;
+  return Array.isArray(q) && q.length === 4 ? q : [0, 0, 0, 1];
+}
 
-// Surfaces are pushed back a hair so the wireframe drawn over them does not flicker.
+function describeRotation(q) {
+  if (!Array.isArray(q)) return 'as in file';
+  const e = new THREE.Euler().setFromQuaternion(new THREE.Quaternion().fromArray(q), 'XYZ');
+  const deg = v => Math.round(THREE.MathUtils.radToDeg(v));
+  return `X ${deg(e.x)}° · Y ${deg(e.y)}° · Z ${deg(e.z)}°`;
+}
+
+// ---------- parts ----------
+// Surfaces are pushed back a hair so overlays drawn over them do not flicker.
 const SURFACE = { side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 };
 const surface = opts => new THREE.MeshStandardMaterial({ roughness: 0.6, metalness: 0, ...SURFACE, ...opts });
 
@@ -313,28 +485,80 @@ const surface = opts => new THREE.MeshStandardMaterial({ roughness: 0.6, metalne
 const wireMaterial = new THREE.MeshBasicMaterial({
   wireframe: true, transparent: true, depthWrite: false, toneMapped: false,
 });
+const selectMaterial = new THREE.MeshBasicMaterial({
+  color: 0x4c9dff, transparent: true, opacity: 0.22, depthWrite: false, toneMapped: false,
+  side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
+});
+const normalLineMaterial = new THREE.LineBasicMaterial({ color: 0x35e0c8, toneMapped: false });
 
-function collectParts(root) {
+// An extra object drawn with a part's mesh (wireframe, selection tint, normals).
+function overlay(obj, part, renderOrder) {
+  obj.userData.overlay = true;
+  obj.raycast = () => {};
+  obj.renderOrder = renderOrder;
+  part.add(obj);
+  return obj;
+}
+
+function collectParts(obj) {
   const meshes = [];
-  root.traverse(o => { if (o.isMesh) meshes.push(o); });
+  obj.traverse(o => { if (o.isMesh) meshes.push(o); });
+  const seen = new Map();
   return meshes.map((mesh, i) => {
     const g = mesh.geometry, pos = g.attributes.position;
-    const wire = new THREE.Mesh(g, wireMaterial);
-    wire.userData.wire = true;
-    wire.renderOrder = 1;
-    mesh.add(wire);
+    const name = mesh.name || mesh.parent?.name || `Part ${i + 1}`;
+    const nth = seen.get(name) ?? 0;
+    seen.set(name, nth + 1);
     return {
-      mesh, wire,
-      name: mesh.name || mesh.parent?.name || `Part ${i + 1}`,
+      mesh, name,
+      key: `${name}#${nth}`,     // identifies the part across a reload
+      wire: overlay(new THREE.Mesh(g, wireMaterial), mesh, 1),
+      normals: null,             // vertex-normal lines, built on demand
       original: mesh.material,   // material(s) from the file
-      override: null,            // material of the current non-textured shading mode
+      override: null,            // material of the current shading mode, if not the file's
+      customMap: null,           // texture assigned by the user
       color: new THREE.Color().setHSL((i * 0.618034) % 1, 0.65, 0.55),
       verts: pos ? pos.count : 0,
       tris: pos ? (g.index ? g.index.count : pos.count) / 3 : 0,
+      basePos: mesh.position.clone(),
+      explodeDelta: new V3(),
     };
   });
 }
 
+// ---------- explode ----------
+// Every part moves away from the model's center along the line through its own
+// center. Offsets are worked out in the model's own space, so they survive
+// orientation changes, and relative to a parent part, so nested meshes do not
+// move twice.
+function computeExplode() {
+  model.updateMatrixWorld(true);
+  const rootInv = root.matrixWorld.clone().invert();
+  const m = new THREE.Matrix4(), tmp = new THREE.Box3(), all = new THREE.Box3();
+  for (const p of parts) {
+    m.multiplyMatrices(rootInv, p.mesh.matrixWorld);
+    tmp.copy(geometryBox(p)).applyMatrix4(m);
+    p.dir = tmp.getCenter(new V3());
+    all.union(tmp);
+  }
+  const center = all.getCenter(new V3());
+  for (const p of parts) p.dir.sub(center);
+  const byMesh = new Map(parts.map(p => [p.mesh, p]));
+  for (const p of parts) {
+    let a = p.mesh.parent;
+    while (a && !byMesh.has(a)) a = a.parent;
+    const d = p.dir.clone();
+    if (a) d.sub(byMesh.get(a).dir);
+    m.multiplyMatrices(rootInv, p.mesh.parent.matrixWorld).invert();
+    p.explodeDelta = d.applyMatrix3(new THREE.Matrix3().setFromMatrix4(m));
+  }
+}
+
+function applyExplode(f) {
+  for (const p of parts) p.mesh.position.copy(p.basePos).addScaledVector(p.explodeDelta, f);
+}
+
+// ---------- shading ----------
 let checker = null;
 function checkerTexture() {
   if (checker) return checker;
@@ -361,21 +585,57 @@ function checkerTexture() {
   return checker;
 }
 
+// Front faces blue, back faces red: flipped polygons stand out at once.
+function facesMaterial(flatShading) {
+  const m = surface({ flatShading });
+  m.onBeforeCompile = shader => {
+    shader.fragmentShader = shader.fragmentShader.replace('#include <color_fragment>',
+      '#include <color_fragment>\n' +
+      'diffuseColor.rgb = gl_FrontFacing ? vec3(0.28, 0.44, 0.85) : vec3(0.9, 0.1, 0.08);');
+  };
+  m.customProgramCacheKey = () => 'faces';
+  return m;
+}
+
+// Vertex colors drawn unlit, either all together or one channel as grey.
+function vertexColorMaterial(hasColors) {
+  if (!hasColors) return new THREE.MeshBasicMaterial({ color: 0x2c2e32, ...SURFACE });
+  const m = new THREE.MeshBasicMaterial({ vertexColors: true, ...SURFACE });
+  const channel = settings.vcChannel;
+  if (channel !== 'rgb') {
+    const value = { r: 'vColor.r', g: 'vColor.g', b: 'vColor.b', a: 'VC_ALPHA' }[channel];
+    m.onBeforeCompile = shader => {
+      shader.fragmentShader = shader.fragmentShader.replace('#include <color_fragment>',
+        '\n#ifdef USE_COLOR_ALPHA\n#define VC_ALPHA vColor.a\n#else\n#define VC_ALPHA 1.0\n#endif\n' +
+        `diffuseColor = vec4(vec3(${value}), 1.0);`);
+    };
+    m.customProgramCacheKey = () => 'vc-' + channel;
+  }
+  return m;
+}
+
 function applyShade() {
+  const mode = settings.shade;
   for (const p of parts) {
     p.override?.dispose();
     p.override = null;
     const g = p.mesh.geometry, flatShading = !g.attributes.normal;
-    if (settings.shade === 'simple') p.override = surface({ color: 0xb8bcc2, flatShading });
-    else if (settings.shade === 'random') p.override = surface({ color: p.color, flatShading });
-    else if (settings.shade === 'checker') {
+    if (mode === 'textured') {
+      if (p.customMap) p.override = surface({ map: p.customMap, flatShading });
+    } else if (mode === 'simple') p.override = surface({ color: 0xb8bcc2, flatShading });
+    else if (mode === 'random') p.override = surface({ color: p.color, flatShading });
+    else if (mode === 'checker') {
       // Parts without UVs have nothing to show; mark them plain red.
       p.override = surface(g.attributes.uv ? { map: checkerTexture(), flatShading } : { color: 0xa03030, flatShading });
-    }
+    } else if (mode === 'vertex') p.override = vertexColorMaterial(!!g.attributes.color);
+    else if (mode === 'faces') p.override = facesMaterial(flatShading);
+    else if (mode === 'normals') p.override = new THREE.MeshNormalMaterial({ flatShading, ...SURFACE });
     p.mesh.material = p.override ?? p.original;
   }
-  $('shade').value = settings.shade;
-  $('parts').classList.toggle('random', settings.shade === 'random');
+  $('shade').value = mode;
+  $('vcchan').value = settings.vcChannel;
+  $('vcchan').hidden = mode !== 'vertex';
+  $('parts').classList.toggle('random', mode === 'random');
 }
 
 function applyWire() {
@@ -408,21 +668,68 @@ function applyWire() {
   $('wirecustom').hidden = mode !== 'custom';
 }
 
+// A short line along the normal of every vertex.
+function buildNormalLines(p) {
+  const g = p.mesh.geometry, pos = g.attributes.position, nor = g.attributes.normal;
+  if (!pos || !nor) return null;
+  const scale = p.mesh.getWorldScale(new V3());
+  const length = (modelBox.getSize(new V3()).length() * 0.012) / (Math.max(scale.x, scale.y, scale.z) || 1);
+  const data = new Float32Array(pos.count * 6);
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+    data.set([x, y, z, x + nor.getX(i) * length, y + nor.getY(i) * length, z + nor.getZ(i) * length], i * 6);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(data, 3));
+  return overlay(new THREE.LineSegments(geo, normalLineMaterial), p.mesh, 1);
+}
+
+function applyNormals() {
+  for (const p of parts) {
+    if (settings.normals && !p.normals) p.normals = buildNormalLines(p);
+    if (p.normals) p.normals.visible = settings.normals;
+  }
+  $('normals').checked = settings.normals;
+}
+
+// ---------- selection ----------
+let selectMesh = null;
+function select(p) {
+  selectMesh?.removeFromParent();
+  selectMesh = null;
+  selected = p ?? null;
+  if (selected) selectMesh = overlay(new THREE.Mesh(selected.mesh.geometry, selectMaterial), selected.mesh, 2);
+  renderParts();
+  renderInfo();
+  $('partlist').querySelector('.sel')?.scrollIntoView({ block: 'nearest' });
+}
+
+const raycaster = new THREE.Raycaster(), pointer = new THREE.Vector2();
+function pick(clientX, clientY) {
+  const r = canvas.getBoundingClientRect();
+  pointer.set(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1);
+  raycaster.setFromCamera(pointer, camera);
+  const meshes = parts.filter(p => p.mesh.visible).map(p => p.mesh);
+  const hit = raycaster.intersectObjects(meshes, false)[0];
+  return hit ? parts.find(p => p.mesh === hit.object) : null;
+}
+
+// ---------- panels ----------
 function renderParts() {
   const list = $('partlist');
   list.textContent = '';
-  parts.forEach(p => {
-    const row = document.createElement('label');
-    row.className = 'part' + (p.mesh.visible ? '' : ' off');
+  for (const p of parts) {
+    const row = document.createElement('div');
+    row.className = 'part' + (p.mesh.visible ? '' : ' off') + (p === selected ? ' sel' : '');
     row.title = p.name;
     const box = document.createElement('input');
     box.type = 'checkbox';
     box.checked = p.mesh.visible;
     box.onchange = () => setVisible(q => (q === p ? box.checked : q.mesh.visible));
     row.onclick = e => {
-      if (!e.altKey) return;
-      e.preventDefault();
-      setVisible(q => q === p);
+      if (e.target === box) return;
+      if (e.altKey) setVisible(q => q === p);
+      else select(p === selected ? null : p);
     };
     const swatch = document.createElement('span');
     swatch.className = 'sw';
@@ -435,7 +742,7 @@ function renderParts() {
     tris.textContent = fmt(p.tris);
     row.append(box, swatch, name, tris);
     list.append(row);
-  });
+  }
   const shown = parts.filter(p => p.mesh.visible).length;
   $('partcount').textContent = shown === parts.length ? `Parts (${parts.length})` : `Parts (${shown} of ${parts.length})`;
 }
@@ -446,11 +753,6 @@ function setVisible(test) {
   updateStats();
 }
 
-function showPartsPanel() {
-  $('parts').hidden = !settings.parts;
-  $('partsbtn').classList.toggle('on', settings.parts);
-}
-
 function updateStats() {
   const shown = parts.filter(p => p.mesh.visible);
   const sum = key => shown.reduce((n, p) => n + p[key], 0);
@@ -458,29 +760,137 @@ function updateStats() {
   $('stats').textContent = `${count} parts · ${fmt(sum('tris'))} triangles · ${fmt(sum('verts'))} vertices`;
 }
 
+const UV_SETS = ['uv', 'uv1', 'uv2', 'uv3'];
+function renderInfo() {
+  const body = $('infobody');
+  body.textContent = '';
+  const el = (cls, text) => {
+    const e = document.createElement('div');
+    e.className = cls;
+    if (text != null) e.textContent = text;
+    body.append(e);
+    return e;
+  };
+  const row = (k, v) => {
+    const r = el('irow');
+    const key = document.createElement('span'); key.className = 'k'; key.textContent = k;
+    const val = document.createElement('span'); val.className = 'v'; val.textContent = v;
+    r.append(key, val);
+  };
+  if (!model) { el('ihint', 'No model loaded.'); return; }
+
+  const [metres, unit] = UNITS[unitKey()];
+  const dims = box => {
+    const s = box.getSize(new V3());
+    const inUnits = `${num(s.x)} × ${num(s.y)} × ${num(s.z)} ${unit}`;
+    return unit === 'm' ? inUnits : `${inUnits}\n${num(s.x * metres)} × ${num(s.y * metres)} × ${num(s.z * metres)} m`;
+  };
+  const has = name => parts.filter(p => p.mesh.geometry.attributes[name]).length;
+  const of = n => (n === parts.length ? 'all parts' : n === 0 ? 'none' : `${n} of ${parts.length} parts`);
+  const materials = new Set(parts.flatMap(p => asArray(p.original)));
+  const textures = new Set([...materials].flatMap(m => TEX_SLOTS.map(k => m[k]).filter(Boolean)));
+
+  el('ihead', 'Model');
+  row('File', current?.name ?? '');
+  row('Size (X×Y×Z)', dims(modelBox));
+  row('Units', `1 unit = 1 ${unit}` + (settings.units === 'auto' ? ' (auto)' : ''));
+  row('Parts', fmt(parts.length));
+  row('Triangles', fmt(parts.reduce((n, p) => n + p.tris, 0)));
+  row('Vertices', fmt(parts.reduce((n, p) => n + p.verts, 0)));
+  row('Materials', fmt(materials.size));
+  row('Textures', fmt(textures.size));
+  row('Normals', of(has('normal')));
+  row('UVs', of(has('uv')));
+  row('Vertex colors', of(has('color')));
+  row('Tangents', of(has('tangent')));
+  const skinned = parts.filter(p => p.mesh.isSkinnedMesh).length;
+  if (skinned) row('Skinned', of(skinned));
+
+  el('ihead', selected ? `Selected: ${selected.name}` : 'Selected part');
+  if (!selected) { el('ihint', 'Click a part in the view or in the parts list.'); return; }
+  const p = selected, a = p.mesh.geometry.attributes;
+  row('Triangles', fmt(p.tris));
+  row('Vertices', fmt(p.verts));
+  row('Size (X×Y×Z)', dims(geometryBox(p).clone().applyMatrix4(p.mesh.matrixWorld)));
+  row('UV sets', UV_SETS.filter(n => a[n]).map((n, i) => `UV${i}`).join(', ') || 'none');
+  row('Normals', a.normal ? 'yes' : 'no');
+  row('Tangents', a.tangent ? 'yes' : 'no');
+  row('Vertex colors', a.color ? (a.color.itemSize === 4 ? 'RGBA' : 'RGB') : 'no');
+  if (p.mesh.isSkinnedMesh) row('Skinned', 'yes');
+  asArray(p.original).forEach((m, i) => {
+    const kind = m.type.replace('Mesh', '').replace('Material', '');
+    row(i ? '' : 'Materials', `${m.name || '(unnamed)'} · ${kind}${m.map ? ' · textured' : ''}`);
+  });
+  row('Texture', p.customMap ? `${p.customMap.name} (assigned here)` : 'from the file');
+  const btns = el('ibtns');
+  const assign = document.createElement('button');
+  assign.textContent = 'Assign texture…';
+  assign.onclick = () => $('texfile').click();
+  btns.append(assign);
+  if (p.customMap) {
+    const clear = document.createElement('button');
+    clear.textContent = 'Remove';
+    clear.onclick = () => { p.customMap.dispose(); p.customMap = null; applyShade(); renderInfo(); };
+    btns.append(clear);
+  }
+  el('ihint', 'You can also drop an image onto a part.');
+}
+
+function showPanels() {
+  $('parts').hidden = !settings.parts;
+  $('partsbtn').classList.toggle('on', settings.parts);
+  $('info').hidden = !settings.info;
+  $('infobtn').classList.toggle('on', settings.info);
+}
+
+// ---------- textures assigned by hand ----------
+const isImage = n => /\.(png|jpe?g|bmp|gif|webp|tga)$/i.test(n);
+function assignTexture(file, p) {
+  const url = URL.createObjectURL(file);
+  const loader = /\.tga$/i.test(file.name) ? new TGALoader() : new THREE.TextureLoader();
+  loader.load(url, tex => {
+    URL.revokeObjectURL(url);
+    tex.name = file.name;
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    p.customMap?.dispose();
+    p.customMap = tex;
+    settings.shade = 'textured';
+    applyShade();
+    renderInfo();
+  }, undefined, () => {
+    URL.revokeObjectURL(url);
+    toast(`Could not read ${file.name} as an image.`);
+  });
+}
+
 // ---------- loading ----------
 const isModel = n => /\.(fbx|obj)$/i.test(n);
 const baseName = p => decodeURIComponent(p).split(/[\\/]/).pop().toLowerCase();
+const diskUrl = p => '/@fs/' + p.replace(/\\/g, '/').split('/').map(encodeURIComponent).join('/');
 
 /**
- * @param {string} name      model file name
- * @param {ArrayBuffer} data model bytes
- * @param {Map<string,string>} files  lower-case file name -> URL for sibling files (textures, mtl)
- * @param {string} basePath  URL prefix for resources not found in `files`
+ * @param source  { name, files, basePath, diskPath, url }
+ *                files: lower-case file name -> URL for sibling files (textures, mtl)
+ *                basePath: URL prefix for resources not found in `files`
+ * @param {ArrayBuffer} data  model bytes
+ * @param {boolean} keep  reload of the same file: keep camera, hidden parts, textures
  */
-async function loadModel(name, data, files = new Map(), basePath = '') {
+async function loadModel(source, data, keep = false) {
+  const { name, files, basePath } = source;
   const manager = new THREE.LoadingManager();
   manager.addHandler(/\.tga$/i, new TGALoader(manager));
   manager.setURLModifier(url => {
     if (/^(blob|data):/i.test(url)) return url;
     return files.get(baseName(url)) ?? url;
   });
-  let pending = false, root = null, materials = null;
+  let pending = false, loaded = null, materials = null;
   manager.onStart = () => (pending = true);
   manager.onLoad = () => { pending = false; if (materials) dropBrokenTextures(materials); };
 
   if (/\.fbx$/i.test(name)) {
-    root = new FBXLoader(manager).parse(data, basePath);
+    loaded = new FBXLoader(manager).parse(data, basePath);
   } else {
     const text = new TextDecoder().decode(data);
     const loader = new OBJLoader(manager);
@@ -492,18 +902,18 @@ async function loadModel(name, data, files = new Map(), basePath = '') {
     if (!mtlUrl) mtlUrl = files.get([...files.keys()].find(k => k.endsWith('.mtl')));
     let hasMtl = false;
     if (mtlUrl) {
-      const res = await fetch(mtlUrl).catch(() => null);
+      const res = await fetch(mtlUrl, { cache: 'no-store' }).catch(() => null);
       if (res?.ok) {
-        const materials = new MTLLoader(manager).parse(await res.text(), basePath);
-        materials.preload();
-        loader.setMaterials(materials);
+        const lib = new MTLLoader(manager).parse(await res.text(), basePath);
+        lib.preload();
+        loader.setMaterials(lib);
         hasMtl = true;
       }
     }
-    root = loader.parse(text);
+    loaded = loader.parse(text);
     if (!hasMtl) {
       const gray = new THREE.MeshStandardMaterial({ color: 0xb8bcc2, roughness: 0.6, metalness: 0 });
-      root.traverse(o => {
+      loaded.traverse(o => {
         if (!o.isMesh) return;
         const m = gray.clone();
         m.vertexColors = !!o.geometry.attributes.color;
@@ -515,7 +925,7 @@ async function loadModel(name, data, files = new Map(), basePath = '') {
 
   // Viewer-friendly material fixes.
   materials = [];
-  eachMaterial(root, m => {
+  eachMaterial(loaded, m => {
     materials.push(m);
     Object.assign(m, SURFACE);
     if (m.transparent && m.opacity === 0) { m.opacity = 1; m.transparent = false; }
@@ -523,37 +933,67 @@ async function loadModel(name, data, files = new Map(), basePath = '') {
   if (!pending) dropBrokenTextures(materials);
 
   let hasGeometry = false;
-  root.traverse(o => { if (o.geometry?.attributes?.position?.count) hasGeometry = true; });
+  loaded.traverse(o => { if (o.geometry?.attributes?.position?.count) hasGeometry = true; });
   if (!hasGeometry) throw new Error('No geometry found in file.');
 
+  // From here on the new model replaces the old one.
+  const carry = new Map();   // what a reload hands over to the same part
+  if (keep) {
+    for (const p of parts) {
+      carry.set(p.key, { visible: p.mesh.visible, customMap: p.customMap });
+      p.customMap = null;
+    }
+  }
+  const oldRotation = keep && model ? model.quaternion.toArray() : null;
+  select(null);
   if (model) { scene.remove(model); disposeModel(model); }
-  // The loaded file sits inside a holder group, so orientation fixes (Rotate X/Y/Z)
+
+  current = source;
+  // The loaded file sits inside a holder group, so orientation fixes (Rot X/Y/Z)
   // never fight with transforms stored in the file itself.
+  root = loaded;
   model = new THREE.Group();
   model.add(root);
-  modelKey = 'rot:' + name.toLowerCase();
-  try {
-    const saved = JSON.parse(localStorage.getItem(modelKey));
-    if (Array.isArray(saved) && saved.length === 4) model.quaternion.fromArray(saved);
-  } catch {}
+  model.quaternion.fromArray(oldRotation ?? initialRotation(name));
   scene.add(model);
+
   parts = collectParts(root);
+  for (const p of parts) {
+    const old = carry.get(p.key);
+    if (!old) continue;
+    p.mesh.visible = old.visible;
+    p.customMap = old.customMap;
+    carry.delete(p.key);
+  }
+  for (const old of carry.values()) old.customMap?.dispose();
+  computeExplode();
+  if (!keep) { explode = 0; $('explode').value = 0; }
+
   applyShade();
   applyWire();
+  refreshScene(!keep);
+  applyNormals();
   renderParts();
-  buildGrid();
-  frame();
   updateStats();
   $('name').textContent = name;
   document.title = `${name} – Model Viewer`;
   $('empty').style.display = 'none';
+  watchCurrent();
 }
 
 let blobUrls = [];
-async function openFiles(fileList) {
+async function openFiles(fileList, dropPoint = null) {
   const list = [...fileList];
   const main = list.find(f => isModel(f.name));
-  if (!main) { toast('No .fbx or .obj file in the selection.'); return; }
+  if (!main) {
+    // An image on its own is a texture for the part it was dropped on.
+    const image = list.find(f => isImage(f.name));
+    if (!image || !model) { toast('No .fbx or .obj file in the selection.'); return; }
+    const target = (dropPoint && pick(dropPoint.x, dropPoint.y)) ?? selected ?? (parts.length === 1 ? parts[0] : null);
+    if (target) assignTexture(image, target);
+    else toast('Drop the image onto the part it belongs to.');
+    return;
+  }
   $('busy').style.display = 'grid';
   await new Promise(r => setTimeout(r, 30)); // let the overlay paint before the blocking parse
   const oldUrls = blobUrls;
@@ -567,15 +1007,12 @@ async function openFiles(fileList) {
   }
   // In the desktop app we know where the file lives, so textures and .mtl files
   // next to it are picked up without having to drop them too.
+  const diskPath = host?.pathForFile(main) || null;
   let basePath = '';
-  const diskPath = window.viewerHost?.pathForFile(main);
-  if (diskPath) {
-    const parts = diskPath.replace(/\\/g, '/').split('/');
-    parts.pop();
-    basePath = '/@fs/' + parts.map(encodeURIComponent).join('/') + '/';
-  }
+  if (diskPath) basePath = diskUrl(diskPath.replace(/[\\/][^\\/]*$/, '')) + '/';
+  const source = { name: main.name, files, basePath, diskPath, url: diskPath ? diskUrl(diskPath) : null };
   try {
-    await loadModel(main.name, await main.arrayBuffer(), files, basePath);
+    await loadModel(source, await main.arrayBuffer());
     oldUrls.forEach(u => URL.revokeObjectURL(u));
   } catch (e) {
     console.error(e);
@@ -589,11 +1026,17 @@ async function openUrl(url) {
   $('busy').style.display = 'grid';
   try {
     const abs = new URL(url, location.href);
-    const res = await fetch(abs);
+    const res = await fetch(abs, { cache: 'no-store' });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const base = abs.href.slice(0, abs.href.lastIndexOf('/') + 1);
-    const name = decodeURIComponent(abs.pathname).split('/').pop();
-    await loadModel(name, await res.arrayBuffer(), new Map(), base);
+    const path = decodeURIComponent(abs.pathname);
+    const source = {
+      name: path.split('/').pop(),
+      files: new Map(),
+      basePath: abs.href.slice(0, abs.href.lastIndexOf('/') + 1),
+      diskPath: path.startsWith('/@fs/') ? path.slice(5).replace(/\//g, '\\') : null,
+      url: abs.href,
+    };
+    await loadModel(source, await res.arrayBuffer());
   } catch (e) {
     console.error(e);
     toast(`Could not load ${url}: ${e.message}`);
@@ -602,13 +1045,68 @@ async function openUrl(url) {
   }
 }
 
+// Load the current file again, keeping the view. Used when it changes on disk.
+let reloading = false;
+async function reload() {
+  if (reloading || !current?.url) return;
+  reloading = true;
+  try {
+    const res = await fetch(current.url, { cache: 'no-store' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    await loadModel(current, await res.arrayBuffer(), true);
+    toast(`Reloaded ${current.name}`, 'info');
+  } catch (e) {
+    console.error(e);
+    toast(`Could not reload ${current.name}: ${e.message}`);
+  } finally {
+    reloading = false;
+  }
+}
+
+function watchCurrent() {
+  host?.watchFile(settings.autoReload && current?.diskPath ? current.diskPath : null);
+}
+host?.onFileChanged(path => { if (current?.diskPath === path) reload(); });
+
+// ---------- screenshot ----------
+async function screenshot(save) {
+  if (!model) return;
+  renderer.render(scene, camera);
+  const url = canvas.toDataURL('image/png');   // background stays transparent
+  if (save) {
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = (current?.name ?? 'model').replace(/\.[^.]+$/, '') + '.png';
+    a.click();
+    return;
+  }
+  try {
+    if (host) host.copyImage(url);
+    else {
+      const blob = await (await fetch(url)).blob();
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+    }
+    toast('Screenshot copied to the clipboard', 'info');
+  } catch (e) {
+    console.error(e);
+    toast('Could not copy the screenshot. Shift+click the button to save it as a file instead.');
+  }
+}
+
 // ---------- UI ----------
+const setShade = mode => { settings.shade = mode; applyShade(); saveSettings(); };
+const toggle = (key, apply) => () => { settings[key] = !settings[key]; apply(); saveSettings(); };
+
 $('open').onclick = () => $('file').click();
 $('file').onchange = e => { openFiles(e.target.files); e.target.value = ''; };
+$('texfile').onchange = e => {
+  if (e.target.files[0] && selected) assignTexture(e.target.files[0], selected);
+  e.target.value = '';
+};
 $('frame').onclick = frame;
-const setShade = mode => { settings.shade = mode; applyShade(); saveSettings(); };
 $('shade').onchange = e => { setShade(e.target.value); e.target.blur(); };
-$('wire').onclick = () => { settings.wire = !settings.wire; applyWire(); saveSettings(); };
+$('vcchan').onchange = e => { settings.vcChannel = e.target.value; applyShade(); saveSettings(); e.target.blur(); };
+$('wire').onclick = toggle('wire', applyWire);
 $('wirecolor').onchange = e => {
   settings.wireColor = e.target.value;
   settings.wire = true;   // picking a colour is a request to see it
@@ -617,36 +1115,100 @@ $('wirecolor').onchange = e => {
   e.target.blur();
 };
 $('wirecustom').oninput = e => { settings.wireCustom = e.target.value; applyWire(); saveSettings(); };
-$('grid').onclick = () => {
-  settings.grid = !settings.grid;
-  if (grid) grid.visible = settings.grid;
-  $('grid').classList.toggle('on', settings.grid);
-  saveSettings();
-};
-$('partsbtn').onclick = () => { settings.parts = !settings.parts; showPartsPanel(); saveSettings(); };
+$('explode').oninput = e => { explode = (e.target.value / 100) * 1.5; applyExplode(explode); };
+for (const axis of ['x', 'y', 'z']) $('rot' + axis).onclick = e => rotate(axis, e.shiftKey);
+$('partsbtn').onclick = toggle('parts', showPanels);
+$('infobtn').onclick = toggle('info', showPanels);
 $('pall').onclick = () => setVisible(() => true);
 $('pnone').onclick = () => setVisible(() => false);
 $('pinv').onclick = () => setVisible(p => !p.mesh.visible);
+$('shot').onclick = e => screenshot(e.shiftKey);
 
-$('grid').classList.toggle('on', settings.grid);
-showPartsPanel();
+// View menu
+const applyGrid = () => { if (grid) grid.visible = settings.grid; $('grid').checked = settings.grid; };
+const applyCube = () => {
+  $('cube').checked = settings.cube;
+  if (!model) return;
+  buildCube();
+  buildGrid();
+  frame();
+};
+const applyDefaultRot = () => { $('defrot').textContent = describeRotation(settings.defaultRot); };
+$('grid').onchange = toggle('grid', applyGrid);
+$('cube').onchange = toggle('cube', applyCube);
+$('normals').onchange = toggle('normals', applyNormals);
+$('autoreload').onchange = toggle('autoReload', watchCurrent);
+$('units').onchange = e => {
+  settings.units = e.target.value;
+  saveSettings();
+  if (!model) return;
+  buildCube();
+  buildGrid();
+  if (cube) frame();
+  renderInfo();
+};
+$('defset').onclick = () => {
+  if (!model) return;
+  settings.defaultRot = model.quaternion.toArray();
+  saveSettings();
+  applyDefaultRot();
+};
+$('defclear').onclick = () => { settings.defaultRot = null; saveSettings(); applyDefaultRot(); };
+$('viewbtn').onclick = () => {
+  const menu = $('viewmenu');
+  menu.hidden = !menu.hidden;
+  const r = $('viewbtn').getBoundingClientRect();
+  menu.style.top = r.bottom + 6 + 'px';
+  menu.style.left = Math.max(10, Math.min(r.left, innerWidth - 260)) + 'px';
+};
+addEventListener('pointerdown', e => {
+  if (!$('viewmenu').contains(e.target) && e.target !== $('viewbtn')) $('viewmenu').hidden = true;
+});
+
+// A click that is not a drag selects the part under the cursor.
+let downAt = null;
+canvas.addEventListener('pointerdown', e => { downAt = e.button === 0 ? { x: e.clientX, y: e.clientY } : null; });
+canvas.addEventListener('pointerup', e => {
+  if (!downAt || !model) return;
+  const moved = Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y);
+  downAt = null;
+  if (moved < 5) select(pick(e.clientX, e.clientY));
+});
+
+$('grid').checked = settings.grid;
+$('cube').checked = settings.cube;
+$('autoreload').checked = settings.autoReload;
+$('units').value = settings.units;
+$('reloadrow').hidden = !host;   // needs the desktop app to watch files
+applyDefaultRot();
+showPanels();
 applyShade();
 applyWire();
+applyNormals();
+renderInfo();
 
 addEventListener('keydown', e => {
-  if (e.ctrlKey || e.metaKey || e.altKey) return;
-  if (e.target.tagName === 'SELECT' || e.target.tagName === 'INPUT') return;
+  if (e.target.tagName === 'SELECT') return;
   const k = e.key.toLowerCase();
-  const shadeKey = { 1: 'textured', 2: 'simple', 3: 'random', 4: 'checker' }[k];
-  if (shadeKey) return setShade(shadeKey);
-  if (k === 'p') return $('partsbtn').click();
-  if (k === 'f') frame();
+  if (e.ctrlKey || e.metaKey) {
+    if (k === 'c' && !getSelection().toString()) { e.preventDefault(); screenshot(false); }
+    else if (k === 's') { e.preventDefault(); screenshot(true); }
+    return;
+  }
+  if (e.altKey) return;
+  if (SHADES[k - 1]) return setShade(SHADES[k - 1]);
+  if (k === 'f5') { e.preventDefault(); reload(); }
+  else if (k === 'escape') { $('viewmenu').hidden = true; select(null); }
+  else if (k === 'f') frame();
   else if (k === 'w') $('wire').click();
   else if (k === 'g') $('grid').click();
+  else if (k === 'm') $('cube').click();
+  else if (k === 'n') $('normals').click();
+  else if (k === 'p') $('partsbtn').click();
+  else if (k === 'i') $('infobtn').click();
   else if (k === 'o') $('open').click();
   else if (k === 'x' || k === 'y' || k === 'z') rotate(k, e.shiftKey);
 });
-for (const axis of ['x', 'y', 'z']) $('rot' + axis).onclick = e => rotate(axis, e.shiftKey);
 
 let dragDepth = 0;
 addEventListener('dragenter', e => { e.preventDefault(); dragDepth++; document.body.classList.add('dragging'); });
@@ -656,15 +1218,26 @@ addEventListener('drop', e => {
   e.preventDefault();
   dragDepth = 0;
   document.body.classList.remove('dragging');
-  if (e.dataTransfer.files.length) openFiles(e.dataTransfer.files);
+  if (e.dataTransfer.files.length) openFiles(e.dataTransfer.files, { x: e.clientX, y: e.clientY });
 });
 
 // Handle for debugging from the browser console.
-window.viewer = { THREE, renderer, scene, camera, controls, frame, rotate, get model() { return model; } };
+window.viewer = {
+  THREE, renderer, scene, camera, controls, frame, rotate, select, pick, reload, settings,
+  get model() { return model; }, get parts() { return parts; }, get selected() { return selected; },
+};
 
-// viewer.html?src=path/or/url/to/model.fbx
+// viewer.html?src=path/or/url/to/model.fbx  (&explode=0..1 &select=partIndex)
 const src = query.get('src');
-if (src) openUrl(src);
+if (src) {
+  openUrl(src).then(() => {
+    if (query.has('explode')) {
+      $('explode').value = query.get('explode') * 100;
+      $('explode').oninput({ target: $('explode') });
+    }
+    if (query.has('select')) select(parts[+query.get('select')]);
+  });
+}
 </script>
 </body>
 </html>
