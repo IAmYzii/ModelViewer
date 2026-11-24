@@ -9,5 +9,5 @@ contextBridge.exposeInMainWorld('viewerHost', {
   watchFile: path => ipcRenderer.send('watch-file', path),
   onFileChanged: callback => ipcRenderer.on('file-changed', (_event, path) => callback(path)),
   // Put a PNG data URL on the clipboard as an image.
-  copyImage: dataUrl => ipcRenderer.send('copy-image', dataUrl),
+  copyImage: dataUrl => ipcRenderer.invoke('copy-image', dataUrl),
 });

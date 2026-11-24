@@ -1,4 +1,4 @@
-const { app, BrowserWindow, protocol, Menu, ipcMain, clipboard, nativeImage } = require('electron');
+const { app, BrowserWindow, protocol, Menu, ipcMain, clipboard, ClipboardItem } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 
@@ -106,10 +106,13 @@ ipcMain.on('watch-file', (event, file) => {
   fs.watchFile(file, { interval: 500 }, listener);
   watchers.set(id, { file, listener });
 });
-ipcMain.on('copy-image', (_event, dataUrl) => {
-  if (typeof dataUrl === 'string' && dataUrl.startsWith('data:image/png')) {
-    clipboard.writeImage(nativeImage.createFromDataURL(dataUrl));
+// Returns nothing on success; a failure rejects in the page, which reports it.
+ipcMain.handle('copy-image', async (_event, dataUrl) => {
+  if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/png;base64,')) {
+    throw new Error('Not a PNG data URL');
   }
+  const png = Buffer.from(dataUrl.slice(dataUrl.indexOf(',') + 1), 'base64');
+  await clipboard.write([new ClipboardItem({ 'image/png': new Blob([png], { type: 'image/png' }) })]);
 });
 
 function createWindow(modelPath) {
@@ -132,7 +135,7 @@ function createWindow(modelPath) {
     const value = argValue(process.argv, name);
     if (value) params.set(name, value);
   }
-  for (const flag of ['parts', 'info', 'cube', 'normals']) {
+  for (const flag of ['parts', 'info', 'cube', 'normals', 'copy']) {
     if (process.argv.includes('--' + flag)) params.set(flag, '1');
   }
   win.loadURL('app://app/viewer.html?' + params);

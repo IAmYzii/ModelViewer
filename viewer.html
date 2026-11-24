@@ -1081,7 +1081,7 @@ async function screenshot(save) {
     return;
   }
   try {
-    if (host) host.copyImage(url);
+    if (host) await host.copyImage(url);
     else {
       const blob = await (await fetch(url)).blob();
       await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
@@ -1236,6 +1236,7 @@ if (src) {
       $('explode').oninput({ target: $('explode') });
     }
     if (query.has('select')) select(parts[+query.get('select')]);
+    if (query.has('copy')) screenshot(false);
   });
 }
 </script>
