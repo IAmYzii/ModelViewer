@@ -17,7 +17,16 @@ use tauri::{
     ipc::{InvokeBody, Request},
     AppHandle, Emitter, Manager, State, WebviewWindow,
 };
-use windows::Win32::UI::Shell::{SHChangeNotify, SHCNE_UPDATEITEM, SHCNF_FLAGS, SHCNF_FLUSH, SHCNF_PATHW};
+use windows::{
+    core::{GUID, PCWSTR},
+    Win32::{
+        System::Com::{CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED},
+        UI::Shell::{
+            IShellItem, ISharedBitmap, IThumbnailCache, SHChangeNotify, SHCreateItemFromParsingName, SHCNE_UPDATEITEM,
+            SHCNF_FLAGS, SHCNF_FLUSH, SHCNF_PATHW, WTS_FORCEEXTRACTION,
+        },
+    },
+};
 
 // ---------------------------------------------------------------- disk files
 //
@@ -239,6 +248,42 @@ fn thumbnail_key(path: &str) -> Result<String, String> {
     Ok(Sha256::digest(&bytes)[..16].iter().map(|b| format!("{b:02x}")).collect())
 }
 
+/// The shell's own thumbnail cache (CLSID_LocalThumbnailCache).
+const LOCAL_THUMBNAIL_CACHE: GUID = GUID::from_u128(0x50ef4544_ac9f_4a8e_b21b_8a26180db13f);
+/// The sizes Explorer's views and preview pane ask for.
+const SHELL_THUMBNAIL_SIZES: [u32; 5] = [48, 96, 256, 768, 1280];
+
+/// Explorer remembers per file what the provider last answered, a thumbnail or
+/// "none", until the file itself changes; a change notice alone does not make
+/// it ask again. Forcing its cache to extract anew replaces that memory, and
+/// the notice afterwards repaints the item.
+fn refresh_shell_thumbnail(path: &str) {
+    let wide: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
+    unsafe {
+        let init = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        {
+            let item: windows::core::Result<IShellItem> = SHCreateItemFromParsingName(PCWSTR(wide.as_ptr()), None);
+            let cache: windows::core::Result<IThumbnailCache> =
+                CoCreateInstance(&LOCAL_THUMBNAIL_CACHE, None, CLSCTX_INPROC_SERVER);
+            if let (Ok(item), Ok(cache)) = (item, cache) {
+                for size in SHELL_THUMBNAIL_SIZES {
+                    let mut bitmap: Option<ISharedBitmap> = None;
+                    let _ = cache.GetThumbnail(&item, size, WTS_FORCEEXTRACTION, Some(&mut bitmap), None, None);
+                }
+            }
+        }
+        SHChangeNotify(
+            SHCNE_UPDATEITEM,
+            SHCNF_FLAGS(SHCNF_PATHW.0 | SHCNF_FLUSH.0),
+            Some(wide.as_ptr() as *const _),
+            None,
+        );
+        if init.is_ok() {
+            CoUninitialize();
+        }
+    }
+}
+
 /// Whether the file, as it is on disk right now, has a thumbnail.
 #[tauri::command]
 fn has_thumbnail(path: String) -> bool {
@@ -256,16 +301,7 @@ fn save_thumbnail(request: Request<'_>) -> Result<(), String> {
     fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let file = dir.join(format!("{}.png", thumbnail_key(&path)?));
     fs::write(&file, raw_body(&request)?).map_err(|e| format!("{}: {e}", file.display()))?;
-    // Explorer windows showing the file pick the new picture up right away.
-    let wide: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
-    unsafe {
-        SHChangeNotify(
-            SHCNE_UPDATEITEM,
-            SHCNF_FLAGS(SHCNF_PATHW.0 | SHCNF_FLUSH.0),
-            Some(wide.as_ptr() as *const _),
-            None,
-        );
-    }
+    refresh_shell_thumbnail(&path);
     Ok(())
 }
 

@@ -1116,11 +1116,11 @@ async function loadModel(source, data, keepTab = null) {
   // once its textures are in and as long as its tab is still the one showing.
   if (!keep && host && active.path) {
     const tab = active;
-    host.hasThumbnail(tab.path).then(has => {
-      if (has) return;
-      const make = () => { if (active === tab && model) saveThumbnail(true); };
+    thumbnailJob = host.hasThumbnail(tab.path).then(has => new Promise(done => {
+      if (has) return done();
+      const make = () => (active === tab && model ? saveThumbnail(true) : Promise.resolve()).then(done);
       if (pending) afterTextures = make; else make();
-    }).catch(e => console.error(e));
+    })).catch(e => console.error(e));
   }
   return true;
 }
@@ -1407,6 +1407,7 @@ async function screenshot(save) {
 // PNG bytes with a transparent background. The floor grid and the reference
 // cube stay out of it.
 const THUMB = 512;
+let thumbnailJob = Promise.resolve();   // the automatic save of the file opened last
 function renderThumbnail() {
   const shown = [grid?.visible, cube?.visible];
   if (grid) grid.visible = false;
@@ -1607,6 +1608,7 @@ if (sources.length) {
     if (host && query.get('screenshot')) {
       setTimeout(async () => {
         try { await host.saveFile(query.get('screenshot'), capture().png()); } catch (e) { console.error(e); }
+        await thumbnailJob;   // the first-open thumbnail may still be on its way
         host.quit();
       }, 1500);
     }
