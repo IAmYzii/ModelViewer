@@ -11,11 +11,13 @@ use std::{
     time::{Duration, Instant, SystemTime},
 };
 
+use sha2::{Digest, Sha256};
 use tauri::{
     http,
     ipc::{InvokeBody, Request},
     AppHandle, Emitter, Manager, State, WebviewWindow,
 };
+use windows::Win32::UI::Shell::{SHChangeNotify, SHCNE_UPDATEITEM, SHCNF_FLAGS, SHCNF_FLUSH, SHCNF_PATHW};
 
 // ---------------------------------------------------------------- disk files
 //
@@ -218,6 +220,55 @@ fn save_file(request: Request<'_>) -> Result<(), String> {
     fs::write(&path, raw_body(&request)?).map_err(|e| format!("{path}: {e}"))
 }
 
+// ---------------------------------------------------------------- thumbnails
+//
+// Explorer gets a model's thumbnail from ModelViewerThumbnail.dll
+// (src-tauri/thumbnail), which answers from the cache the page fills here:
+// one PNG per file, named by the file's content hash so it survives moves and
+// copies and goes stale when the file is re-exported.
+
+fn thumbnail_dir() -> Result<PathBuf, String> {
+    let local = std::env::var_os("LOCALAPPDATA").ok_or("LOCALAPPDATA is not set")?;
+    Ok(PathBuf::from(local).join("ModelViewer").join("thumbnails"))
+}
+
+/// SHA-256 of the file's bytes, first 16 bytes as hex. Must match
+/// `content_key` in src-tauri/thumbnail/src/lib.rs.
+fn thumbnail_key(path: &str) -> Result<String, String> {
+    let bytes = fs::read(path).map_err(|e| format!("{path}: {e}"))?;
+    Ok(Sha256::digest(&bytes)[..16].iter().map(|b| format!("{b:02x}")).collect())
+}
+
+/// Whether the file, as it is on disk right now, has a thumbnail.
+#[tauri::command]
+fn has_thumbnail(path: String) -> bool {
+    match (thumbnail_dir(), thumbnail_key(&path)) {
+        (Ok(dir), Ok(key)) => dir.join(format!("{key}.png")).is_file(),
+        _ => false,
+    }
+}
+
+/// Body: the thumbnail as PNG. Header: x-path (percent-encoded) of the model.
+#[tauri::command]
+fn save_thumbnail(request: Request<'_>) -> Result<(), String> {
+    let path = percent_decode(header(&request, "x-path")?);
+    let dir = thumbnail_dir()?;
+    fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let file = dir.join(format!("{}.png", thumbnail_key(&path)?));
+    fs::write(&file, raw_body(&request)?).map_err(|e| format!("{}: {e}", file.display()))?;
+    // Explorer windows showing the file pick the new picture up right away.
+    let wide: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
+    unsafe {
+        SHChangeNotify(
+            SHCNE_UPDATEITEM,
+            SHCNF_FLAGS(SHCNF_PATHW.0 | SHCNF_FLUSH.0),
+            Some(wide.as_ptr() as *const _),
+            None,
+        );
+    }
+    Ok(())
+}
+
 // ---------------------------------------------------------------- window
 #[tauri::command]
 fn set_title(window: WebviewWindow, title: String) {
@@ -255,6 +306,8 @@ fn main() {
             watch_files,
             copy_image,
             save_file,
+            has_thumbnail,
+            save_thumbnail,
             set_title,
             quit
         ])

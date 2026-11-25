@@ -181,6 +181,7 @@
   <button id="partsbtn" title="Parts list">Parts<kbd>P</kbd></button>
   <button id="infobtn" title="Model information">Info<kbd>I</kbd></button>
   <button id="shot" title="Copy a screenshot to the clipboard (Ctrl+C). Shift+click or Ctrl+S saves a PNG.">Screenshot</button>
+  <button id="thumb" title="Use the current view as this file's thumbnail in Explorer">Thumbnail</button>
   <button id="viewbtn" title="View options">View ▾</button>
 </div>
 
@@ -235,6 +236,7 @@ import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
 import { MTLLoader } from 'three/addons/loaders/MTLLoader.js';
 import { TGALoader } from 'three/addons/loaders/TGALoader.js';
+import { upgradeLegacyFbx } from './fbx6.js';
 
 const $ = id => document.getElementById(id);
 const canvas = $('view');
@@ -270,6 +272,10 @@ const host = tauri && {
     tauri.core.invoke('save_file', bytes, { headers: { 'x-path': encodeURIComponent(path) } }),
   copyImage: (rgba, width, height) =>
     tauri.core.invoke('copy_image', rgba, { headers: { 'x-width': String(width), 'x-height': String(height) } }),
+  // Explorer thumbnails, kept by the app per file content; see save_thumbnail in main.rs.
+  hasThumbnail: path => tauri.core.invoke('has_thumbnail', { path }),
+  saveThumbnail: (path, png) =>
+    tauri.core.invoke('save_thumbnail', png, { headers: { 'x-path': encodeURIComponent(path) } }),
 };
 const V3 = THREE.Vector3;
 
@@ -997,12 +1003,13 @@ async function loadModel(source, data, keepTab = null) {
     if (/^(blob|data):/i.test(url)) return url;
     return files.get(baseName(url)) ?? url;
   });
-  let pending = false, loaded = null, materials = null;
+  let pending = false, loaded = null, materials = null, afterTextures = null;
   manager.onStart = () => (pending = true);
-  manager.onLoad = () => { pending = false; if (materials) dropBrokenTextures(materials); };
+  manager.onLoad = () => { pending = false; if (materials) dropBrokenTextures(materials); afterTextures?.(); };
 
   if (/\.fbx$/i.test(name)) {
-    loaded = new FBXLoader(manager).parse(data, basePath);
+    // FBX 6.x binaries (old 3ds Max exports) are rewritten as 7.x text first.
+    loaded = new FBXLoader(manager).parse(upgradeLegacyFbx(data), basePath);
   } else {
     const text = new TextDecoder().decode(data);
     const loader = new OBJLoader(manager);
@@ -1105,6 +1112,16 @@ async function loadModel(source, data, keepTab = null) {
   $('empty').style.display = 'none';
   renderTabs();
   watchAll();
+  // A file opened from disk for the first time gets its Explorer thumbnail,
+  // once its textures are in and as long as its tab is still the one showing.
+  if (!keep && host && active.path) {
+    const tab = active;
+    host.hasThumbnail(tab.path).then(has => {
+      if (has) return;
+      const make = () => { if (active === tab && model) saveThumbnail(true); };
+      if (pending) afterTextures = make; else make();
+    }).catch(e => console.error(e));
+  }
   return true;
 }
 
@@ -1385,6 +1402,55 @@ async function screenshot(save) {
   }
 }
 
+// ---------- thumbnail ----------
+// The view cropped to the model and shrunk to THUMB px on the longer side, as
+// PNG bytes with a transparent background. The floor grid and the reference
+// cube stay out of it.
+const THUMB = 512;
+function renderThumbnail() {
+  const shown = [grid?.visible, cube?.visible];
+  if (grid) grid.visible = false;
+  if (cube) cube.visible = false;
+  renderer.render(scene, camera);
+  let x0 = canvas.width, y0 = canvas.height, x1 = 0, y1 = 0;
+  const corner = new V3();
+  for (let i = 0; i < 8 && !modelBox.isEmpty(); i++) {
+    corner.set(i & 1 ? modelBox.max.x : modelBox.min.x, i & 2 ? modelBox.max.y : modelBox.min.y,
+      i & 4 ? modelBox.max.z : modelBox.min.z).project(camera);
+    const px = (corner.x + 1) / 2 * canvas.width, py = (1 - corner.y) / 2 * canvas.height;
+    x0 = Math.min(x0, px); y0 = Math.min(y0, py); x1 = Math.max(x1, px); y1 = Math.max(y1, py);
+  }
+  const pad = Math.max(x1 - x0, y1 - y0) * 0.06;
+  x0 = Math.max(0, Math.floor(x0 - pad)); y0 = Math.max(0, Math.floor(y0 - pad));
+  x1 = Math.min(canvas.width, Math.ceil(x1 + pad)); y1 = Math.min(canvas.height, Math.ceil(y1 + pad));
+  if (!(x1 > x0 && y1 > y0)) { x0 = 0; y0 = 0; x1 = canvas.width; y1 = canvas.height; }
+  const scale = Math.min(1, THUMB / Math.max(x1 - x0, y1 - y0));
+  const out = document.createElement('canvas');
+  out.width = Math.max(1, Math.round((x1 - x0) * scale));
+  out.height = Math.max(1, Math.round((y1 - y0) * scale));
+  out.getContext('2d').drawImage(canvas, x0, y0, x1 - x0, y1 - y0, 0, 0, out.width, out.height);
+  if (grid) grid.visible = shown[0];
+  if (cube) cube.visible = shown[1];
+  const url = out.toDataURL('image/png');
+  return Uint8Array.from(atob(url.slice(url.indexOf(',') + 1)), c => c.charCodeAt(0));
+}
+
+// Save the current view as the open file's Explorer thumbnail. `quiet` is the
+// automatic one on first open: no messages.
+async function saveThumbnail(quiet) {
+  if (!host || !model || !active?.path) {
+    if (!quiet) toast('Thumbnails need a model opened from disk.');
+    return;
+  }
+  try {
+    await host.saveThumbnail(active.path, renderThumbnail());
+    if (!quiet) toast('Thumbnail saved for Explorer', 'info');
+  } catch (e) {
+    console.error(e);
+    if (!quiet) toast(`Could not save the thumbnail: ${e?.message ?? e}`);
+  }
+}
+
 // ---------- UI ----------
 const setShade = mode => { settings.shade = mode; applyShade(); saveSettings(); };
 const toggle = (key, apply) => () => { settings[key] = !settings[key]; apply(); saveSettings(); };
@@ -1415,6 +1481,7 @@ $('pall').onclick = () => setVisible(() => true);
 $('pnone').onclick = () => setVisible(() => false);
 $('pinv').onclick = () => setVisible(p => !p.mesh.visible);
 $('shot').onclick = e => screenshot(e.shiftKey);
+$('thumb').onclick = () => saveThumbnail(false);
 
 // View menu
 const applyGrid = () => { if (grid) grid.visible = settings.grid; $('grid').checked = settings.grid; };
@@ -1473,6 +1540,7 @@ $('cube').checked = settings.cube;
 $('autoreload').checked = settings.autoReload;
 $('units').value = settings.units;
 $('reloadrow').hidden = !host;   // needs the desktop app to watch files
+$('thumb').hidden = !host;       // thumbnails live in the app's cache
 applyDefaultRot();
 showPanels();
 applyShade();

@@ -20,10 +20,12 @@ mkdirSync(out, { recursive: true });
 
 const html = readFileSync(join(root, 'viewer.html'), 'utf8');
 writeFileSync(join(out, 'viewer.html'), html.replace(CDN, './three/'));
+const fbx6 = readFileSync(join(root, 'fbx6.js'), 'utf8');
+writeFileSync(join(out, 'fbx6.js'), fbx6);
 
-// Start from the modules viewer.html imports and follow their relative imports.
+// Start from the modules viewer.html and fbx6.js import and follow their relative imports.
 const queue = ['build/three.module.js'];
-for (const m of html.matchAll(/from 'three\/addons\/([^']+)'/g)) queue.push('examples/jsm/' + m[1]);
+for (const m of (html + fbx6).matchAll(/from 'three\/addons\/([^']+)'/g)) queue.push('examples/jsm/' + m[1]);
 const seen = new Set();
 while (queue.length) {
   const file = queue.pop();
