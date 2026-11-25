@@ -113,6 +113,7 @@
     font-variant-numeric: tabular-nums; pointer-events: none;
   }
   #help { position: fixed; right: 12px; bottom: 10px; color: var(--muted); pointer-events: none; }
+  #version { position: fixed; right: 12px; bottom: 28px; color: var(--muted); font-size: 11px; opacity: .75; pointer-events: none; }
   #empty {
     position: fixed; inset: 0; display: grid; place-items: center; text-align: center;
     pointer-events: none; color: var(--muted);
@@ -141,6 +142,7 @@
 <body>
 <canvas id="view" tabindex="0"></canvas>
 
+<div id="version"></div>
 <div id="tabs"></div>
 <div id="bar">
   <button id="open" title="Open a model (O)">Open…</button>
@@ -240,6 +242,10 @@ import { upgradeLegacyFbx } from './fbx6.js';
 
 const $ = id => document.getElementById(id);
 const canvas = $('view');
+
+// Filled in by scripts/build-web.mjs; the page opened straight from the repo says so.
+const VERSION = '__VERSION__';
+$('version').textContent = VERSION.startsWith('__') ? 'dev build' : 'v' + VERSION;
 
 // ---------- desktop app bridge ----------
 // Inside the desktop app (Tauri) the page can reach the disk and the system;

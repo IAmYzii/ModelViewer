@@ -2,6 +2,7 @@
 //   viewer.html, pointed at a local copy of three.js instead of the CDN
 //   three/…      only the three.js modules the viewer actually imports
 import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { execSync } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -18,8 +19,15 @@ if (!existsSync(three)) {
 rmSync(out, { recursive: true, force: true });
 mkdirSync(out, { recursive: true });
 
+// "0.3.0 build 12 (7c0cfb1)"; a trailing + marks uncommitted changes. Shown in the window corner.
+const git = args => { try { return execSync(`git ${args}`, { cwd: root, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim(); } catch { return ''; } };
+const { version } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+const dirty = git('status --porcelain') ? '+' : '';
+const built = new Date().toISOString().slice(0, 16).replace('T', ' ') + ' UTC';
+const build = `${version} build ${git('rev-list --count HEAD') || '?'} (${git('rev-parse --short HEAD') || 'no git'}${dirty}) ${built}`;
+
 const html = readFileSync(join(root, 'viewer.html'), 'utf8');
-writeFileSync(join(out, 'viewer.html'), html.replace(CDN, './three/'));
+writeFileSync(join(out, 'viewer.html'), html.replace(CDN, './three/').replace('__VERSION__', build));
 const fbx6 = readFileSync(join(root, 'fbx6.js'), 'utf8');
 writeFileSync(join(out, 'fbx6.js'), fbx6);
 
@@ -40,4 +48,4 @@ while (queue.length) {
     queue.push(join(dirname(file), m[1]).replace(/\\/g, '/'));
   }
 }
-console.log(`web/: viewer.html + ${seen.size} three.js modules`);
+console.log(`web/: viewer.html + ${seen.size} three.js modules, version ${build}`);

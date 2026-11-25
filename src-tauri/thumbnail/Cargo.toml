@@ -1,6 +1,6 @@
 [package]
 name = "model-viewer-thumbnail"
-version = "0.2.0"
+version = "0.3.0"
 description = "Explorer thumbnail provider for Model Viewer"
 edition = "2021"
 

@@ -1,6 +1,6 @@
 [package]
 name = "model-viewer"
-version = "0.2.0"
+version = "0.3.0"
 description = "Quick viewer for FBX and OBJ files"
 edition = "2021"
 

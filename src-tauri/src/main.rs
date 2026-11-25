@@ -23,7 +23,7 @@ use windows::{
         System::Com::{CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED},
         UI::Shell::{
             IShellItem, ISharedBitmap, IThumbnailCache, SHChangeNotify, SHCreateItemFromParsingName, SHCNE_UPDATEITEM,
-            SHCNF_FLAGS, SHCNF_FLUSH, SHCNF_PATHW, WTS_FORCEEXTRACTION,
+            SHCNF_FLAGS, SHCNF_FLUSHNOWAIT, SHCNF_PATHW, WTS_FORCEEXTRACTION,
         },
     },
 };
@@ -256,32 +256,76 @@ const SHELL_THUMBNAIL_SIZES: [u32; 5] = [48, 96, 256, 768, 1280];
 /// Explorer remembers per file what the provider last answered, a thumbnail or
 /// "none", until the file itself changes; a change notice alone does not make
 /// it ask again. Forcing its cache to extract anew replaces that memory, and
-/// the notice afterwards repaints the item.
-fn refresh_shell_thumbnail(path: &str) {
-    let wide: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
-    unsafe {
-        let init = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
-        {
-            let item: windows::core::Result<IShellItem> = SHCreateItemFromParsingName(PCWSTR(wide.as_ptr()), None);
-            let cache: windows::core::Result<IThumbnailCache> =
-                CoCreateInstance(&LOCAL_THUMBNAIL_CACHE, None, CLSCTX_INPROC_SERVER);
-            if let (Ok(item), Ok(cache)) = (item, cache) {
-                for size in SHELL_THUMBNAIL_SIZES {
-                    let mut bitmap: Option<ISharedBitmap> = None;
-                    let _ = cache.GetThumbnail(&item, size, WTS_FORCEEXTRACTION, Some(&mut bitmap), None, None);
+/// the notice afterwards repaints the item. The calls reach into other
+/// processes and may wait on them, so this runs on a thread of its own and
+/// never holds up the window; every step goes to refresh.log next to the cache.
+fn refresh_shell_thumbnail(path: String, mut log: RefreshLog) {
+    thread::spawn(move || {
+        log.step("refresh thread running");
+        let wide: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
+        unsafe {
+            let init = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+            {
+                let item: windows::core::Result<IShellItem> = SHCreateItemFromParsingName(PCWSTR(wide.as_ptr()), None);
+                let cache: windows::core::Result<IThumbnailCache> =
+                    CoCreateInstance(&LOCAL_THUMBNAIL_CACHE, None, CLSCTX_INPROC_SERVER);
+                match (item, cache) {
+                    (Ok(item), Ok(cache)) => {
+                        for size in SHELL_THUMBNAIL_SIZES {
+                            let mut bitmap: Option<ISharedBitmap> = None;
+                            let result = cache.GetThumbnail(&item, size, WTS_FORCEEXTRACTION, Some(&mut bitmap), None, None);
+                            log.step(&format!("{size}: {}", result.map(|_| "ok".to_string()).unwrap_or_else(|e| e.to_string())));
+                        }
+                    }
+                    (item, cache) => log.step(&format!("setup failed: item {} cache {}", item.is_ok(), cache.is_ok())),
                 }
             }
+            SHChangeNotify(
+                SHCNE_UPDATEITEM,
+                SHCNF_FLAGS(SHCNF_PATHW.0 | SHCNF_FLUSHNOWAIT.0),
+                Some(wide.as_ptr() as *const _),
+                None,
+            );
+            log.step("notified");
+            if init.is_ok() {
+                CoUninitialize();
+            }
         }
-        SHChangeNotify(
-            SHCNE_UPDATEITEM,
-            SHCNF_FLAGS(SHCNF_PATHW.0 | SHCNF_FLUSH.0),
-            Some(wide.as_ptr() as *const _),
-            None,
-        );
-        if init.is_ok() {
-            CoUninitialize();
+    });
+}
+
+/// refresh.log next to the cache: one block per saved thumbnail, each step
+/// flushed as it happens, with the provider DLL's own lines in between (it
+/// writes to the same file). Started over past 1 MB.
+struct RefreshLog {
+    file: Option<fs::File>,
+    started: Instant,
+}
+
+impl RefreshLog {
+    fn open(path: &str) -> Self {
+        let file = thumbnail_dir().ok().and_then(|dir| {
+            let log = dir.join("refresh.log");
+            let oversized = fs::metadata(&log).map(|m| m.len() > 1 << 20).unwrap_or(false);
+            fs::OpenOptions::new().append(!oversized).write(true).truncate(oversized).create(true).open(log).ok()
+        });
+        let mut log = RefreshLog { file, started: Instant::now() };
+        log.step(&format!("--- {} pid {} {path}", unix_seconds(), std::process::id()));
+        log
+    }
+
+    fn step(&mut self, text: &str) {
+        if let Some(file) = &mut self.file {
+            use std::io::Write;
+            let _ = writeln!(file, "{:>6} ms  {text}", self.started.elapsed().as_millis());
+            let _ = file.sync_data();
         }
     }
+}
+
+/// Seconds since the Unix epoch; enough to order log lines without a date crate.
+fn unix_seconds() -> u64 {
+    SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
 /// Whether the file, as it is on disk right now, has a thumbnail.
@@ -300,8 +344,11 @@ fn save_thumbnail(request: Request<'_>) -> Result<(), String> {
     let dir = thumbnail_dir()?;
     fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let file = dir.join(format!("{}.png", thumbnail_key(&path)?));
-    fs::write(&file, raw_body(&request)?).map_err(|e| format!("{}: {e}", file.display()))?;
-    refresh_shell_thumbnail(&path);
+    let bytes = raw_body(&request)?;
+    fs::write(&file, bytes).map_err(|e| format!("{}: {e}", file.display()))?;
+    let mut log = RefreshLog::open(&path);
+    log.step(&format!("saved {} ({} bytes)", file.display(), bytes.len()));
+    refresh_shell_thumbnail(path, log);
     Ok(())
 }
 

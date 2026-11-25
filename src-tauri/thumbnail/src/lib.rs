@@ -66,9 +66,26 @@ fn fail<E>(_: E) -> Error {
     E_FAIL.into()
 }
 
-fn cache_path(key: &str) -> Result<PathBuf> {
+fn cache_dir() -> Result<PathBuf> {
     let local = std::env::var_os("LOCALAPPDATA").ok_or_else(|| Error::from(E_FAIL))?;
-    Ok(PathBuf::from(local).join("ModelViewer").join("thumbnails").join(format!("{key}.png")))
+    Ok(PathBuf::from(local).join("ModelViewer").join("thumbnails"))
+}
+
+fn cache_path(key: &str) -> Result<PathBuf> {
+    Ok(cache_dir()?.join(format!("{key}.png")))
+}
+
+/// One line per request in refresh.log next to the cache, the same file the
+/// viewer writes its side into. The log is started over past 1 MB.
+fn note(text: &str) {
+    let Ok(dir) = cache_dir() else { return };
+    let path = dir.join("refresh.log");
+    let oversized = std::fs::metadata(&path).map(|m| m.len() > 1 << 20).unwrap_or(false);
+    let file = std::fs::OpenOptions::new().append(!oversized).write(true).truncate(oversized).create(true).open(path);
+    if let Ok(mut file) = file {
+        use std::io::Write;
+        let _ = writeln!(file, "           provider in pid {}: {text}", std::process::id());
+    }
 }
 
 /// SHA-256 of the file's bytes, first 16 bytes as hex. Must match
@@ -219,7 +236,13 @@ impl IThumbnailProvider_Impl for Provider_Impl {
             return Err(E_POINTER.into());
         }
         let stream = self.stream.borrow().clone().ok_or_else(|| Error::from(E_UNEXPECTED))?;
-        let mut image = load_png(&cache_path(&content_key(&stream)?)?)?;
+        let key = content_key(&stream).map_err(|e| {
+            note(&format!("cannot read the stream: {e}"));
+            e
+        })?;
+        let path = cache_path(&key)?;
+        note(&format!("{cx} px for {key}: {}", if path.is_file() { "cached" } else { "no thumbnail yet" }));
+        let mut image = load_png(&path)?;
         premultiply(&mut image.rgba);
         let image = fit(image, cx as usize);
         let bitmap = dib_from(&image)?;

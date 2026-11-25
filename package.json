@@ -1,7 +1,7 @@
 {
   "name": "model-viewer",
   "productName": "Model Viewer",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Quick viewer for FBX and OBJ files",
   "private": true,
   "scripts": {
