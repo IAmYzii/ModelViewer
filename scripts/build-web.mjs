@@ -22,7 +22,7 @@ mkdirSync(out, { recursive: true });
 // "0.3.0 build 12 (7c0cfb1)"; a trailing + marks uncommitted changes. Shown in the window corner.
 const git = args => { try { return execSync(`git ${args}`, { cwd: root, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim(); } catch { return ''; } };
 const { version } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
-const dirty = git('status --porcelain') ? '+' : '';
+const dirty = git('status --porcelain -- . ":!dist"') ? '+' : '';
 const built = new Date().toISOString().slice(0, 16).replace('T', ' ') + ' UTC';
 const build = `${version} build ${git('rev-list --count HEAD') || '?'} (${git('rev-parse --short HEAD') || 'no git'}${dirty}) ${built}`;
 

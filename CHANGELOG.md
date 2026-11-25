@@ -16,6 +16,8 @@ both `Cargo.toml` files together.
   file's first open and on the new Thumbnail button, and `ModelViewerThumbnail.dll`
   (`src-tauri/thumbnail`) serves it to the shell. `install.ps1` registers it.
 - Version and build number in the corner of the window; this changelog.
+- Prebuilt `ModelViewer.exe` and `ModelViewerThumbnail.dll` in `dist\`, so a
+  clone installs with `install.ps1` alone; `npm run dist` refreshes them.
 
 ### Fixed
 - Explorer and the shell's thumbnail cache pick up new and replaced thumbnails

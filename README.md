@@ -32,7 +32,22 @@ the discontinued 3D Viewer.
 - Rotate 90° around X / Y / Z (`X`, `Y`, `Z`, Shift reverses) to fix badly
   oriented exports; the fix is remembered per file name
 
-## Build and install
+## Install
+
+Clone the repo and run, in PowerShell:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install.ps1
+```
+
+`dist\` holds the prebuilt `ModelViewer.exe` and `ModelViewerThumbnail.dll`; no
+toolchain is needed. The `-ExecutionPolicy Bypass` part is only there because
+Windows refuses to run `.ps1` files by default; it applies to this one command.
+Run the install from a normal PowerShell window: the registry entries it
+writes must land in your real user registry, which a sandboxed shell (such as
+an AI coding agent's terminal) may keep to itself.
+
+## Build
 
 The app is a [Tauri](https://tauri.app) shell (Rust) around `viewer.html`; it
 uses the WebView2 runtime that ships with Windows 10/11, so the result is a
@@ -45,6 +60,9 @@ npm install
 npm run build
 .\install.ps1
 ```
+
+`install.ps1` prefers your own build over `dist\`. `npm run dist` builds and
+refreshes `dist\`; commit it so the next clone gets the new version.
 
 `install.ps1` copies `ModelViewer.exe` and `ModelViewerThumbnail.dll` to
 `%LOCALAPPDATA%\Programs\ModelViewer`, adds the viewer to the "Open with" list

@@ -7,7 +7,8 @@
   "scripts": {
     "web": "node scripts/build-web.mjs",
     "dev": "npm run web && cargo run --manifest-path src-tauri/Cargo.toml --",
-    "build": "npm run web && cargo build --release --workspace --manifest-path src-tauri/Cargo.toml"
+    "build": "npm run web && cargo build --release --workspace --manifest-path src-tauri/Cargo.toml",
+    "dist": "npm run build && node scripts/dist.mjs"
   },
   "devDependencies": {
     "three": "0.170.0"

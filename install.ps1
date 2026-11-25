@@ -9,10 +9,12 @@
 #                              thumbnail provider and the thumbnail cache
 param([switch]$Uninstall)
 
-# Cargo builds into src-tauri\target unless CARGO_TARGET_DIR points elsewhere.
+# Your own build (Cargo builds into src-tauri\target unless CARGO_TARGET_DIR
+# points elsewhere) wins; without one, the prebuilt binaries in dist\ are used.
 $targetDir = if ($env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR } else { Join-Path $PSScriptRoot 'src-tauri\target' }
-$source    = Join-Path $targetDir 'release\ModelViewer.exe'
-$sourceDll = Join-Path $targetDir 'release\ModelViewerThumbnail.dll'
+$sourceDir = if (Test-Path (Join-Path $targetDir 'release\ModelViewer.exe')) { Join-Path $targetDir 'release' } else { Join-Path $PSScriptRoot 'dist' }
+$source    = Join-Path $sourceDir 'ModelViewer.exe'
+$sourceDll = Join-Path $sourceDir 'ModelViewerThumbnail.dll'
 $target = Join-Path $env:LOCALAPPDATA 'Programs\ModelViewer'
 $exe    = Join-Path $target 'ModelViewer.exe'
 $dll    = Join-Path $target 'ModelViewerThumbnail.dll'
@@ -67,13 +69,11 @@ if ($Uninstall) {
     return
 }
 
-if (-not (Test-Path $source)) {
-    Write-Error "Build not found: $source -- run 'npm run build' first."
-    return
-}
-if (-not (Test-Path $sourceDll)) {
-    Write-Error "Build not found: $sourceDll -- run 'npm run build' first."
-    return
+foreach ($file in $source, $sourceDll) {
+    if (-not (Test-Path $file)) {
+        Write-Error "Not found: $file -- run 'npm run build', or check out dist\ from the repo."
+        return
+    }
 }
 
 # Start from a clean folder, so files of an older version do not linger.
@@ -103,7 +103,7 @@ foreach ($ext in $extensions) {
 }
 Update-Shell
 
-Write-Host "Installed to $target"
+Write-Host "Installed $sourceDir to $target"
 Write-Host 'Right-click an .fbx or .obj file -> Open with -> Choose another app -> Model Viewer -> Always.'
 Write-Host 'Explorer shows a thumbnail for every model once it has been opened in Model Viewer.'
 if (-not $freed) { Write-Host 'Explorer still uses the previous thumbnail DLL; it switches once it lets go of it, or after a restart.' }
