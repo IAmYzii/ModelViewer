@@ -34,18 +34,25 @@ the discontinued 3D Viewer.
 
 ## Install
 
-Clone the repo and run, in PowerShell:
+Clone the repo and start `dist\ModelViewer.exe`. On first start it offers to
+install itself for the current user: it copies the app and
+`ModelViewerThumbnail.dll` to `%LOCALAPPDATA%\Programs\ModelViewer`, adds
+Model Viewer to "Open with" for `.fbx` and `.obj` and registers the thumbnail
+provider, all without admin rights. The same prompt comes back when the
+installed copy is older than the one you started, or when the registration is
+missing. No toolchain is needed; `dist\` holds the prebuilt binaries.
+
+The same thing from a script:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
-`dist\` holds the prebuilt `ModelViewer.exe` and `ModelViewerThumbnail.dll`; no
-toolchain is needed. The `-ExecutionPolicy Bypass` part is only there because
-Windows refuses to run `.ps1` files by default; it applies to this one command.
-Run the install from a normal PowerShell window: the registry entries it
-writes must land in your real user registry, which a sandboxed shell (such as
-an AI coding agent's terminal) may keep to itself.
+(`-ExecutionPolicy Bypass` only because Windows refuses to run `.ps1` files by
+default; it applies to this one command.) `.\install.ps1 -Uninstall` removes
+everything again, thumbnails included. Run either from a normal window: the
+registry entries must land in your real user registry, which a sandboxed shell
+(such as an AI coding agent's terminal) may keep to itself.
 
 ## Build
 

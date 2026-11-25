@@ -20,10 +20,16 @@ use tauri::{
 use windows::{
     core::{GUID, PCWSTR},
     Win32::{
-        System::Com::{CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED},
+        System::{
+            Com::{CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED},
+            Registry::{
+                RegCloseKey, RegCreateKeyExW, RegGetValueW, RegSetValueExW, HKEY, HKEY_CURRENT_USER, KEY_WRITE, REG_DWORD,
+                REG_OPTION_NON_VOLATILE, REG_SZ, RRF_RT_REG_DWORD, RRF_RT_REG_SZ,
+            },
+        },
         UI::Shell::{
-            IShellItem, ISharedBitmap, IThumbnailCache, SHChangeNotify, SHCreateItemFromParsingName, SHCNE_UPDATEITEM,
-            SHCNF_FLAGS, SHCNF_FLUSHNOWAIT, SHCNF_PATHW, WTS_FORCEEXTRACTION,
+            IShellItem, ISharedBitmap, IThumbnailCache, SHChangeNotify, SHCreateItemFromParsingName, SHCNE_ASSOCCHANGED,
+            SHCNE_UPDATEITEM, SHCNF_FLAGS, SHCNF_FLUSHNOWAIT, SHCNF_IDLIST, SHCNF_PATHW, WTS_FORCEEXTRACTION,
         },
     },
 };
@@ -352,6 +358,207 @@ fn save_thumbnail(request: Request<'_>) -> Result<(), String> {
     Ok(())
 }
 
+// ---------------------------------------------------------------- install
+//
+// What install.ps1 does, from inside the app, for the current user (no admin):
+// the page asks install_status() on start and, when the user agrees to the
+// prompt, install_for_user() copies the exe and the thumbnail provider DLL to
+// %LOCALAPPDATA%\Programs\ModelViewer, adds the app to "Open with" for .fbx
+// and .obj and registers the provider. install.ps1 stays for scripted installs
+// and for -Uninstall; the registry layout here must match it.
+
+const INSTALL_DIR: &str = "Programs\\ModelViewer";
+const PROVIDER_DLL: &str = "ModelViewerThumbnail.dll";
+const PROVIDER_CLSID_TEXT: &str = "{9C1F2E7A-5B3D-4E86-A0F4-6D2B8C1E7F35}";
+const THUMBNAIL_HANDLER: &str = "{E357FCCD-A995-4576-B01F-234630154E96}";
+const MODEL_EXTENSIONS: [&str; 2] = [".fbx", ".obj"];
+
+#[derive(serde::Serialize)]
+struct InstallStatus {
+    install_dir: String,
+    running_from_install: bool,
+    files_current: bool,
+    registered: bool,
+    provider_found: bool,
+}
+
+fn install_dir() -> Result<PathBuf, String> {
+    let local = std::env::var_os("LOCALAPPDATA").ok_or("LOCALAPPDATA is not set")?;
+    Ok(PathBuf::from(local).join(INSTALL_DIR))
+}
+
+/// The exe this process runs from and the provider DLL that ships next to it.
+fn running_files() -> Result<(PathBuf, PathBuf), String> {
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let dll = exe.parent().ok_or("the app has no directory")?.join(PROVIDER_DLL);
+    Ok((exe, dll))
+}
+
+fn same_file(a: &Path, b: &Path) -> bool {
+    matches!((fs::canonicalize(a), fs::canonicalize(b)), (Ok(a), Ok(b)) if a == b)
+}
+
+fn same_content(a: &Path, b: &Path) -> bool {
+    matches!((fs::read(a), fs::read(b)), (Ok(a), Ok(b)) if a == b)
+}
+
+fn wide(text: &str) -> Vec<u16> {
+    text.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+fn user_value(sub: &str, name: &str) -> Option<String> {
+    let (sub, name) = (wide(sub), wide(name));
+    let mut data = [0u16; 1024];
+    let mut size = (data.len() * 2) as u32;
+    let err = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            PCWSTR(sub.as_ptr()),
+            PCWSTR(name.as_ptr()),
+            RRF_RT_REG_SZ,
+            None,
+            Some(data.as_mut_ptr() as *mut _),
+            Some(&mut size),
+        )
+    };
+    (err.0 == 0).then(|| String::from_utf16_lossy(&data[..(size as usize / 2).saturating_sub(1)]))
+}
+
+fn user_dword(sub: &str, name: &str) -> Option<u32> {
+    let (sub, name) = (wide(sub), wide(name));
+    let mut data = 0u32;
+    let mut size = 4u32;
+    let err = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            PCWSTR(sub.as_ptr()),
+            PCWSTR(name.as_ptr()),
+            RRF_RT_REG_DWORD,
+            None,
+            Some(&mut data as *mut _ as *mut _),
+            Some(&mut size),
+        )
+    };
+    (err.0 == 0).then_some(data)
+}
+
+fn set_user_value(sub: &str, name: &str, kind: windows::Win32::System::Registry::REG_VALUE_TYPE, data: &[u8]) -> Result<(), String> {
+    let (sub_w, name_w) = (wide(sub), wide(name));
+    let mut key = HKEY::default();
+    let err = unsafe {
+        RegCreateKeyExW(HKEY_CURRENT_USER, PCWSTR(sub_w.as_ptr()), None, PCWSTR::null(), REG_OPTION_NON_VOLATILE, KEY_WRITE, None, &mut key, None)
+    };
+    if err.0 != 0 {
+        return Err(format!("cannot create HKCU\\{sub}: error {}", err.0));
+    }
+    let err = unsafe { RegSetValueExW(key, PCWSTR(name_w.as_ptr()), None, kind, Some(data)) };
+    let _ = unsafe { RegCloseKey(key) };
+    if err.0 != 0 {
+        return Err(format!("cannot write HKCU\\{sub}\\{name}: error {}", err.0));
+    }
+    Ok(())
+}
+
+fn set_sz(sub: &str, name: &str, value: &str) -> Result<(), String> {
+    let bytes: Vec<u8> = wide(value).iter().flat_map(|c| c.to_le_bytes()).collect();
+    set_user_value(sub, name, REG_SZ, &bytes)
+}
+
+fn set_dword(sub: &str, name: &str, value: u32) -> Result<(), String> {
+    set_user_value(sub, name, REG_DWORD, &value.to_le_bytes())
+}
+
+fn open_with_command(exe: &Path) -> String {
+    format!("\"{}\" \"%1\"", exe.display())
+}
+
+/// Whether the registry points at exactly these installed files.
+fn registered_for(exe: &Path, dll: &Path) -> bool {
+    let clsid = format!("Software\\Classes\\CLSID\\{PROVIDER_CLSID_TEXT}");
+    user_value("Software\\Classes\\Applications\\ModelViewer.exe\\shell\\open\\command", "").as_deref()
+        == Some(open_with_command(exe).as_str())
+        && user_value(&format!("{clsid}\\InprocServer32"), "").as_deref() == Some(dll.display().to_string().as_str())
+        && user_dword(&clsid, "DisableProcessIsolation") == Some(1)
+        && MODEL_EXTENSIONS.iter().all(|ext| {
+            user_value(&format!("Software\\Classes\\{ext}\\ShellEx\\{THUMBNAIL_HANDLER}"), "").as_deref()
+                == Some(PROVIDER_CLSID_TEXT)
+        })
+}
+
+fn register(exe: &Path, dll: &Path) -> Result<(), String> {
+    let app = "Software\\Classes\\Applications\\ModelViewer.exe";
+    set_sz(app, "FriendlyAppName", "Model Viewer")?;
+    set_sz(&format!("{app}\\shell\\open\\command"), "", &open_with_command(exe))?;
+    for ext in MODEL_EXTENSIONS {
+        set_sz(&format!("{app}\\SupportedTypes"), ext, "")?;
+    }
+    // The provider runs inside Explorer: the shell's isolated thumbnail host
+    // cannot create classes registered for the current user only.
+    let clsid = format!("Software\\Classes\\CLSID\\{PROVIDER_CLSID_TEXT}");
+    set_sz(&clsid, "", "Model Viewer Thumbnail Provider")?;
+    set_dword(&clsid, "DisableProcessIsolation", 1)?;
+    set_sz(&format!("{clsid}\\InprocServer32"), "", &dll.display().to_string())?;
+    set_sz(&format!("{clsid}\\InprocServer32"), "ThreadingModel", "Apartment")?;
+    for ext in MODEL_EXTENSIONS {
+        set_sz(&format!("Software\\Classes\\{ext}\\ShellEx\\{THUMBNAIL_HANDLER}"), "", PROVIDER_CLSID_TEXT)?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn install_status() -> Result<InstallStatus, String> {
+    let dir = install_dir()?;
+    let (exe, dll) = running_files()?;
+    let (installed_exe, installed_dll) = (dir.join("ModelViewer.exe"), dir.join(PROVIDER_DLL));
+    let running_from_install = same_file(&exe, &installed_exe);
+    let files_current = running_from_install
+        || (same_content(&exe, &installed_exe) && same_content(&dll, &installed_dll));
+    Ok(InstallStatus {
+        install_dir: dir.display().to_string(),
+        running_from_install,
+        files_current,
+        registered: registered_for(&installed_exe, &installed_dll),
+        provider_found: dll.is_file(),
+    })
+}
+
+/// Copies the running exe and DLL into the install folder (unless running from
+/// there), registers both, and tells Explorer. Returns the install folder.
+#[tauri::command]
+fn install_for_user() -> Result<String, String> {
+    let dir = install_dir()?;
+    let (exe, dll) = running_files()?;
+    if !dll.is_file() {
+        return Err(format!("{} is missing next to the app", dll.display()));
+    }
+    fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let installed_exe = dir.join("ModelViewer.exe");
+    let installed_dll = dir.join(PROVIDER_DLL);
+    if !same_file(&exe, &installed_exe) && !same_content(&exe, &installed_exe) {
+        fs::copy(&exe, &installed_exe).map_err(|e| format!("cannot copy the app to {}: {e}", installed_exe.display()))?;
+    }
+    if !same_file(&dll, &installed_dll) && !same_content(&dll, &installed_dll) {
+        // Explorer keeps the DLL loaded for a while; a loaded DLL cannot be
+        // replaced in place but can be renamed aside. Parked copies that are
+        // free again are removed next time.
+        if installed_dll.exists() && fs::remove_file(&installed_dll).is_err() {
+            let parked = dir.join(format!("ModelViewerThumbnail.{}.old", unix_seconds()));
+            fs::rename(&installed_dll, &parked).map_err(|e| format!("cannot replace {}: {e}", installed_dll.display()))?;
+        }
+        fs::copy(&dll, &installed_dll).map_err(|e| format!("cannot copy the provider to {}: {e}", installed_dll.display()))?;
+    }
+    if let Ok(entries) = fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            if entry.path().extension().is_some_and(|e| e == "old") {
+                let _ = fs::remove_file(entry.path());
+            }
+        }
+    }
+    register(&installed_exe, &installed_dll)?;
+    unsafe { SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, None, None) };
+    Ok(dir.display().to_string())
+}
+
 // ---------------------------------------------------------------- window
 #[tauri::command]
 fn set_title(window: WebviewWindow, title: String) {
@@ -391,6 +598,8 @@ fn main() {
             save_file,
             has_thumbnail,
             save_thumbnail,
+            install_status,
+            install_for_user,
             set_title,
             quit
         ])

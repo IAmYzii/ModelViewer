@@ -22,7 +22,8 @@ tauri-plugin-single-instance = "2"
 arboard = "3"
 # Thumbnail cache keys (must hash like src-tauri/thumbnail) and the Explorer refresh.
 sha2 = "0.11"
-windows = { version = "0.62", features = ["Win32_System_Com", "Win32_UI_Shell"] }
+serde = { version = "1", features = ["derive"] }
+windows = { version = "0.62", features = ["Win32_Security", "Win32_System_Com", "Win32_System_Registry", "Win32_UI_Shell"] }
 
 [profile.release]
 opt-level = "s"

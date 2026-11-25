@@ -96,6 +96,12 @@
   .ihint { padding: 4px 10px; color: var(--muted); }
   .ibtns { display: flex; gap: 6px; padding: 6px 10px; }
 
+  #firstrun {
+    position: fixed; top: 52px; left: 50%; transform: translateX(-50%); z-index: 6; width: 470px; max-width: calc(100% - 24px);
+    padding: 12px 16px; background: #1d2024; border: 1px solid #3a3f46; border-radius: 10px; font-size: 13px; line-height: 1.4;
+  }
+  #firstrun p { margin: 6px 0 10px; color: var(--muted); }
+  #firstrun .buttons { display: flex; gap: 8px; justify-content: flex-end; }
   #viewmenu {
     position: fixed; z-index: 5; width: 250px; padding: 6px 0; background: #1d2024;
     border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 24px rgba(0, 0, 0, .4);
@@ -187,6 +193,11 @@
   <button id="viewbtn" title="View options">View ▾</button>
 </div>
 
+<div id="firstrun" hidden>
+  <b id="fr-title"></b>
+  <p id="fr-text"></p>
+  <div class="buttons"><button id="fr-install">Install</button><button id="fr-later">Not now</button><button id="fr-never">Don't ask again</button></div>
+</div>
 <div id="viewmenu" hidden>
   <label><input id="grid" type="checkbox"><span>Floor grid</span><kbd>G</kbd></label>
   <label><input id="cube" type="checkbox"><span>1 m reference cube</span><kbd>M</kbd></label>
@@ -282,6 +293,9 @@ const host = tauri && {
   hasThumbnail: path => tauri.core.invoke('has_thumbnail', { path }),
   saveThumbnail: (path, png) =>
     tauri.core.invoke('save_thumbnail', png, { headers: { 'x-path': encodeURIComponent(path) } }),
+  // The first-run install: what install.ps1 does, see install_for_user in main.rs.
+  installStatus: () => tauri.core.invoke('install_status'),
+  installForUser: () => tauri.core.invoke('install_for_user'),
 };
 const V3 = THREE.Vector3;
 
@@ -327,7 +341,7 @@ const modelBox = new THREE.Box3();   // world bounds of the assembled model
 const settings = {
   shade: 'textured', vcChannel: 'rgb', wire: false, wireColor: 'black', wireCustom: '#ff8800',
   grid: true, cube: false, normals: false, parts: false, info: false,
-  units: 'auto', defaultRot: null, autoReload: true,
+  units: 'auto', defaultRot: null, autoReload: true, installPrompt: 'ask',
 };
 try { Object.assign(settings, JSON.parse(localStorage.getItem('settings')) ?? {}); } catch {}
 const query = new URLSearchParams(location.search);
@@ -1599,6 +1613,42 @@ window.viewer = {
   get active() { return active; },
   get model() { return model; }, get parts() { return parts; }, get selected() { return selected; },
 };
+
+// ---------- first-run install ----------
+// Offers, on start, what install.ps1 does: copy the app and its thumbnail
+// provider to the per-user Programs folder, add it to "Open with" for .fbx and
+// .obj and register the provider so Explorer shows thumbnails. Appears when any
+// of that is missing or outdated; "Don't ask again" is remembered.
+async function offerInstall() {
+  if (!host || settings.installPrompt === 'never' || query.has('screenshot')) return;
+  let status;
+  try { status = await host.installStatus(); } catch (e) { console.error(e); return; }
+  if (!status.provider_found || (status.registered && status.files_current)) return;
+  const update = status.registered && !status.files_current;
+  $('fr-title').textContent = status.running_from_install ? 'Register Model Viewer in Explorer?'
+    : update ? 'Update the installed Model Viewer?' : 'Install Model Viewer for this user?';
+  $('fr-text').textContent = (status.running_from_install ? '' : `Copies the app to ${status.install_dir}, `)
+    + (status.running_from_install ? 'Adds' : 'adds') + ' it to "Open with" for .fbx and .obj files and registers its thumbnail'
+    + ' provider, so Explorer shows a thumbnail for every model you open here. Current user only, no admin rights.';
+  $('fr-install').textContent = status.running_from_install ? 'Register' : update ? 'Update' : 'Install';
+  $('fr-install').disabled = false;
+  $('firstrun').hidden = false;
+}
+$('fr-install').onclick = async () => {
+  $('fr-install').disabled = true;
+  try {
+    const dir = await host.installForUser();
+    $('firstrun').hidden = true;
+    toast(`Installed to ${dir}. Right-click a model, Open with, Model Viewer; Explorer shows thumbnails for models you open.`, 'info');
+  } catch (e) {
+    console.error(e);
+    $('fr-install').disabled = false;
+    toast(`Could not install: ${e?.message ?? e}`);
+  }
+};
+$('fr-later').onclick = () => { $('firstrun').hidden = true; };
+$('fr-never').onclick = () => { settings.installPrompt = 'never'; saveSettings(); $('firstrun').hidden = true; };
+offerInstall();
 
 // viewer.html?src=path/or/url/to/model.fbx  (repeatable; &explode=0..1 &select=partIndex)
 const sources = query.getAll('src');

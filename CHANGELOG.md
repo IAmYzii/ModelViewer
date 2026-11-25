@@ -18,6 +18,8 @@ both `Cargo.toml` files together.
 - Version and build number in the corner of the window; this changelog.
 - Prebuilt `ModelViewer.exe` and `ModelViewerThumbnail.dll` in `dist\`, so a
   clone installs with `install.ps1` alone; `npm run dist` refreshes them.
+- First-run prompt: the app offers to install itself for the current user
+  (copy, "Open with", thumbnail provider) and to update an older install.
 
 ### Fixed
 - Explorer and the shell's thumbnail cache pick up new and replaced thumbnails
